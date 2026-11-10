@@ -7,130 +7,143 @@
 - **形态**：桌面应用（Electron 壳）+ 平台侧领域插件（Python / 驱动平台插件契约）
 - **命名**：产品 `PhoNote`；平台插件 `pho_note`；工具名前缀 `note_`
 - **存储**：独立目录（默认 `D:\PhoNote`），可整体打包备份
+- **组织方式**：**任意深度的自由文件树**（文件夹 + 笔记叶子，可建/改名/拖动/删除）
+- **同步**：WebDAV（快照 + 图片增量，单向提交点为 manifest）
 - **项目地址**：`https://github.com/qw2007/PhoNote`（private）
 
 ---
 
-## 1. 五个已锁定的决策
+## 1. 七个已锁定的决策
 
 | # | 决策 | 选择 | 理由 | 代价 / 何时回退 |
 |---|------|------|------|----------------|
-| 1 | 客户端形态 | **直接上桌面壳：Electron** | 本机有 Node 24.19.0，**没有 Rust/cargo，也没有 MSVC(cl.exe)/gcc** → Tauri 需要先装 VS Build Tools + Rust（>1 GB，且本机无 cl）；Electron 只依赖已有 Node。系统级全局热键、静默截屏、托盘常驻都只有桌面壳能给 | 安装包 ~150–200 MB；首次 `npm install` 要能连 npm（国内建议先配镜像）。若日后有 Rust 工具链，可换 Tauri 减小体积，接口不变 |
-| 2 | AI 接入 | **api 与 manual 双模式并存，默认 `off`** | api 全自动（OpenAI-compatible / Anthropic），manual 走网页版（免费或已付费的订阅），二者是不同成本结构，不能二选一 | manual 需要人复制粘贴（见 §7.3） |
-| 3 | 笔记真话 | **Markdown 是正文唯一真话**，SQLite 只存索引/元数据/版本 | 导出、迁移、被 Agent 读写、diff、回滚全都最省事；富文本/结构化 JSON 会让"让 AI 改一段"变成协议设计题 | 若要富文本排版，用 Markdown 子集 + 前端渲染，不做 WYSIWYG 存储 |
-| 4 | 层级 | **课程 → 笔记**（一门课一个笔记库，笔记按课程归档） | 网课天然按课程/讲次组织；扁平标签在 20 节课后就会失控 | 需要跨课程视图时再加标签，不动主结构 |
-| 5 | 存储 | **独立目录**：`D:\PhoNote\`（`phonote.db` + `media/` + `backups/`） | 便于单独备份/迁移，不与驱动平台的数据卷耦合；一个 zip 就是完整备份 | 多设备同步留白（§12）；不做自动云同步 |
+| 1 | 客户端形态 | **直接上桌面壳：Electron** | 本机有 Node 24.19.0，**没有 Rust/cargo，也没有 MSVC(cl.exe)/gcc** → Tauri 需要先装 VS Build Tools + Rust（>1 GB）；Electron 只依赖已有 Node。系统级全局热键、静默截屏、托盘常驻只有桌面壳能给 | 安装包 ~150–200 MB；首次 `npm install` 要能连 npm（先配镜像）。日后有 Rust 工具链可换 Tauri，接口不变 |
+| 2 | AI 接入 | **api 与 manual 双模式并存，默认 `off`** | api 全自动（OpenAI-compatible / Anthropic）；manual 走网页版（免费或已付费订阅）。两者成本结构不同，不能二选一 | manual 需要人复制粘贴（§8.3） |
+| 3 | 笔记真话 | **Markdown 是正文唯一真话**，SQLite 只存索引/元数据/版本 | 导出、迁移、被 Agent 读写、diff、回滚最省事 | 要富文本排版时用 Markdown 子集 + 前端渲染，不做 WYSIWYG 存储 |
+| 4 | 组织层级 | **自由文件树**：任意深度文件夹 + 笔记叶子，可随时建/改名/移动/删除/排序 | 网课结构因人而异（有的按课程，有的按周，有的按主题），固定两级一定会被顶破；树是唯一不会后悔的结构 | 需要"课程"视图时用"某个文件夹"当课程，不回到固定字段 |
+| 5 | 存储 | **独立目录**：`D:\PhoNote\`（`phonote.db` + `media/` + `backups/`） | 便于单独备份/迁移，不与驱动平台数据卷耦合 | 多设备靠 §9 的 WebDAV |
+| 6 | 多设备同步 | **WebDAV**：整库快照 + 图片内容寻址增量，manifest 作为提交点；**单主设备**约定，不做双向字段级合并 | 坚果云/Nextcloud/群晖都自带 WebDAV；按 sha256 传图片天然幂等，只传缺的；合并两份会变的正文要向量时钟，属过度设计 | 真正多写并发时再考虑 CRDT/逐条记录同步 |
+| 7 | 钥匙 | **壳用只读钥匙浏览，主设备用读写钥匙** | 第二台设备/投屏/分享只需要看；只读钥匙把误删风险关在门外。作用域是精确匹配、没有通配，所以两把钥匙各写全 | 单设备用户只用读写钥匙即可（§10） |
 
-补充两个默认值（可改，不必拍板）：
+补充默认值（可改，不必拍板）：
 
-- 图片落盘为 **WebP，长边默认 1600**，原图可选保留（`keep_original=true`）；
+- 图片落盘 **WebP 长边 1600**；**默认不保留原图**（`keep_original` 默认 false，需要时按次开启）；
 - 平台插件默认**关闭**（`DRIVER_NOTES_ENABLED=0`），UI 端点默认关闭。
 
 ---
 
 ## 2. 系统架构
 
-三层，边界清晰，各自可单独替换：
-
 ```
 ┌───────────────────────────── PhoNote 桌面壳（Electron）─────────────────────────────┐
-│  main 进程                        │  renderer（四分区 UI）                          │
-│  · globalShortcut 全局热键        │  · ① 图片区 ② 批注区 ③ 现有笔记区 ④ 讨论区      │
+│  main 进程                        │  renderer（四分区 UI + 文件树导航）              │
+│  · globalShortcut 全局热键        │  · 树导航 / ① 图片区 ② 批注区 ③ 笔记区 ④ 讨论区  │
 │  · desktopCapturer + 静默取帧     │  · Markdown 渲染 / 编辑 / 版本对比              │
-│  · 托盘 / 悬浮提示 / 剪贴板兜底   │  · 本地缓存与离线草稿                            │
-│  · 平台进程管理（可选本地拉起）   │                                                 │
+│  · 托盘 / 悬浮提示 / 剪贴板兜底   │  · 本地只读缓存与离线草稿                        │
+│  · 平台进程管理（可选本地拉起）   │  · WebDAV 同步触发（调平台工具）                 │
 └───────────────────────────────┬────────────────────────────────────────────────────┘
-                                │ HTTP + X-API-Key（同一套 REST 契约）
+                                │ HTTP + X-API-Key（读写钥匙 / 只读钥匙）
 ┌───────────────────────────────▼────────────────────────────────────────────────────┐
 │ 驱动平台（已有，Python / FastAPI）                                                   │
-│  · 插件 pho_note：抓取入库 / 笔记 CRUD / 批注 / 版本 / AI 总结与对话 / 导出           │
+│  · 插件 pho_note：文件树 / 抓取入库 / 笔记 CRUD / 批注 / 版本 / AI 总结与对话 / 导出   │
+│  · WebDAV 同步（httpx，PUT/PROPFIND/MKCOL）                                          │
 │  · 复用：鉴权与作用域、错误信封、request_id、指标、日志、特性开关                     │
-│  · 存储：SQLite（索引）+ 文件目录（图片）                                             │
+│  · 存储：SQLite（树 + 索引）+ 文件目录（图片）                                        │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-为什么不是"壳里直接操作 SQLite"：领域能力要能被 Agent 以工具形式调用（这是驱动平台存在的意义），所以真话只有一份，放在插件里；壳只是**又一个客户端**。这也让"以后做网页版/手机版"变成零成本。
+为什么不是"壳里直接操作 SQLite"：领域能力要能被 Agent 以工具形式调用（这是驱动平台存在的意义），真话只有一份，放在插件里；壳只是**又一个客户端**。这也让"以后做网页版/手机版"零成本。
 
-### 2.1 部署形态（壳怎么连平台）
+### 2.1 部署形态
 
 | 形态 | 说明 | 适用 |
 |------|------|------|
-| `remote` | 壳填 `base_url` + `api_key`，连已在跑的实例（`docker compose up` 或本机 uvicorn） | 默认；多设备共用一台 |
-| `local-spawn` | 壳启动时拉起 `docker compose up -d`（或本机 `.venv` 的 uvicorn），退出可选停 | 单机"打开就能用" |
+| `remote` | 壳填 `base_url` + `api_key`，连已在跑的实例 | 默认；多设备共用一台 |
+| `local-spawn` | 壳启动时拉起 `docker compose up -d`（或本机 `.venv` 的 uvicorn） | 单机"打开就能用" |
 | 纯离线（后期） | 壳内置 Python sidecar（PyInstaller 打包） | 不装 Docker 的分发形态 |
-
-P0/P1 只做前两种；`local-spawn` 用一条命令 + 健康轮询即可，不引入进程框架。
 
 ---
 
-## 3. 领域模型
+## 3. 领域模型：自由文件树
 
 ```
-Course 1 ──< Note 1 ──< Revision
-                ├──< NoteImage >── Capture
-                ├──< Annotation（锚：整篇 / 单图 / 图上框）
-                └──< Message（讨论区，关联某 Revision）
+Node（唯一实体的树）
+├── kind = 'folder'  → 只做容器，可任意深度
+└── kind = 'note'    → 叶子；有 body_md / 图片 / 批注 / 讨论 / 版本
 
-Capture 独立于 Note 存在：截图先落缓冲区，之后才被"任意多张"挑进某个笔记。
+Capture（缓冲区，不入树）
+   截图先落这里（note_id 为空），之后被"任意多张"挑进某个 note 节点。
+
+node ──< revision
+     ├──< note_image >── capture
+     ├──< annotation（锚：整篇 / 文本 / 图上框）
+     └──< message
 ```
 
 关键设计：
 
-1. **Capture 是全局缓冲区**，未入笔记时 `note_id IS NULL`。`sha256` 唯一 → 同一张幻灯片截两次自动去重（提示"已存在"）。
-2. **Note 与 Capture 多对多**（`note_images` 带 `position`）：同一张图可以进多个笔记（复习时重组）。
-3. **Revision 只增不改**：`note_update` / `note_summarize` / `note_apply_patch` 都会先拍快照。回滚 = 把旧 `body_md` 写回并再拍一次（不改历史）。
-4. **批注锚点必须可随文移动**：文本用 `TextQuoteSelector`（`quote` + `prefix` + `suffix`）而不是纯 offset —— 笔记被 AI 改过之后 offset 必然漂移。
+1. **一张表装下整棵树**：`nodes(id, parent_id, kind, name, position, body_md)`。`parent_id IS NULL` 即根；`folder` 不进 `body_md`。树深不设上限（实际用 3–5 层）。
+2. **排序用整数 `position`**：拖拽后对同层重排（`0..n-1`）。同层节点数是个位数到几十，O(n) 重排没有成本，不需要 `sort_key`/分数索引。
+3. **同层名称唯一**：`UNIQUE(IFNULL(parent_id, ''), name)`。重名自动加 ` (2)`，避免树里出现两个不可区分的"第 3 讲"。
+4. **移动要防成环**：把 A 移到自己的后代下 → 拒绝（`invalid_arguments`）。删除目录默认递归（`ON DELETE CASCADE`），图片留在缓冲区。
+5. **路径不落库**：用递归 CTE 现算（导出、面包屑、WebDAV 的清单都用它）。不存 `path` 就没有"改了名忘了改路径"的一致性 bug。
 
 ### 3.1 表结构
 
 ```sql
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
 PRAGMA user_version = 1;            -- 迁移靠它，按序 1→2→3
 
-CREATE TABLE courses (
+CREATE TABLE nodes (
   id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  instructor  TEXT,
+  parent_id   TEXT REFERENCES nodes(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL CHECK (kind IN ('folder', 'note')),
+  name        TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  position    INTEGER NOT NULL DEFAULT 0,
+  body_md     TEXT NOT NULL DEFAULT '',     -- 仅 kind='note' 使用
   created_at  TEXT NOT NULL,
-  archived    INTEGER NOT NULL DEFAULT 0
+  updated_at  TEXT NOT NULL,
+  CHECK (kind = 'note' OR body_md = '')      -- 文件夹永远没有正文
 );
-
-CREATE TABLE notes (
-  id          TEXT PRIMARY KEY,
-  course_id   TEXT REFERENCES courses(id) ON DELETE SET NULL,
-  title       TEXT NOT NULL,
-  body_md     TEXT NOT NULL DEFAULT '',
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
+CREATE UNIQUE INDEX ux_nodes_sibling_name ON nodes(IFNULL(parent_id, ''), name);
+CREATE INDEX idx_nodes_parent ON nodes(parent_id, position);
+CREATE INDEX idx_nodes_updated ON nodes(updated_at DESC);
 
 CREATE TABLE captures (
   id          TEXT PRIMARY KEY,
-  sha256      TEXT NOT NULL UNIQUE,
-  path        TEXT NOT NULL,          -- 相对 media/，便于整目录搬迁
+  sha256      TEXT NOT NULL UNIQUE,          -- 内容寻址：同图只存一份、只传一次
+  path        TEXT NOT NULL,                 -- 相对 media/
   thumb_path  TEXT,
   width       INTEGER NOT NULL,
   height      INTEGER NOT NULL,
   bytes       INTEGER NOT NULL,
-  source      TEXT,                   -- 'screen' | 'window' | 'paste' | 'agent'
-  app_title   TEXT,                   -- 截屏时的前台窗口标题（便于事后认课）
-  created_at  TEXT NOT NULL,
-  note_id     TEXT REFERENCES notes(id) ON DELETE SET NULL   -- 兼容旧形态；新代码以 note_images 为准
+  source      TEXT,                          -- 'screen' | 'window' | 'paste' | 'agent'
+  app_title   TEXT,
+  created_at  TEXT NOT NULL
 );
 
 CREATE TABLE note_images (
-  note_id     TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  note_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   capture_id  TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
   position    INTEGER NOT NULL,
   PRIMARY KEY (note_id, capture_id)
 );
 
+CREATE TABLE revisions (
+  id          TEXT PRIMARY KEY,
+  note_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  body_md     TEXT NOT NULL,
+  reason      TEXT NOT NULL,   -- 'manual' | 'ai_summary' | 'ai_patch' | 'rollback'
+  created_at  TEXT NOT NULL
+);
+
 CREATE TABLE annotations (
   id          TEXT PRIMARY KEY,
-  note_id     TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-  kind        TEXT NOT NULL,          -- 'note' | 'text' | 'image'
-  anchor      TEXT NOT NULL,          -- JSON，见 §3.2
+  note_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,   -- 'note' | 'text' | 'image'
+  anchor      TEXT NOT NULL,   -- JSON，见 §3.2
   body_md     TEXT NOT NULL,
   color       TEXT,
   created_at  TEXT NOT NULL
@@ -138,48 +151,62 @@ CREATE TABLE annotations (
 
 CREATE TABLE messages (
   id          TEXT PRIMARY KEY,
-  note_id     TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-  role        TEXT NOT NULL,          -- 'user' | 'assistant' | 'system'
+  note_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,   -- 'user' | 'assistant' | 'system'
   body        TEXT NOT NULL,
-  revision_id TEXT,                   -- assistant 回复基于/产生的版本
+  revision_id TEXT,
   created_at  TEXT NOT NULL
 );
 
-CREATE TABLE revisions (
-  id          TEXT PRIMARY KEY,
-  note_id     TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-  body_md     TEXT NOT NULL,
-  reason      TEXT NOT NULL,          -- 'manual' | 'ai_summary' | 'ai_patch' | 'rollback'
-  created_at  TEXT NOT NULL
-);
-
-CREATE INDEX idx_notes_course   ON notes(course_id, updated_at DESC);
-CREATE INDEX idx_captures_unused ON captures(note_id, created_at DESC);
-CREATE INDEX idx_messages_note  ON messages(note_id, created_at);
+CREATE INDEX idx_captures_created ON captures(created_at DESC);
+CREATE INDEX idx_messages_note ON messages(note_id, created_at);
+CREATE INDEX idx_annotations_note ON annotations(note_id);
 ```
 
-### 3.2 批注锚点三种形态
+### 3.2 树的三个核心查询
+
+```sql
+-- 整棵树（带深度与路径，前端一次拿全）
+WITH RECURSIVE tree(id, parent_id, kind, name, position, depth, path) AS (
+  SELECT id, parent_id, kind, name, position, 0, name
+  FROM nodes WHERE parent_id IS NULL
+  UNION ALL
+  SELECT n.id, n.parent_id, n.kind, n.name, n.position,
+         tree.depth + 1, tree.path || '/' || n.name
+  FROM nodes n JOIN tree ON n.parent_id = tree.id
+)
+SELECT * FROM tree ORDER BY path, position;
+```
+
+```sql
+-- 移动前防环：new_parent 是否是 self 或 self 的后代
+WITH RECURSIVE sub(id) AS (
+  SELECT id FROM nodes WHERE id = :self
+  UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+)
+SELECT 1 FROM sub WHERE id = :new_parent;
+```
+
+```sql
+-- 同层重排（把 node 放到 target 前后）：整体重编号，避免浮点 key
+UPDATE nodes SET position = :i WHERE id = :id;
+```
+
+### 3.3 批注锚点三种形态
 
 ```jsonc
 // 整篇
 { "kind": "note", "anchor": { "type": "note" } }
 
-// 文本：优先 quote（可随文移动），offset 仅作快速定位
+// 文本：quote 可随文移动，offset 只作快速定位
 { "kind": "text", "anchor": {
-    "type": "text",
-    "quote": "中值定理的三个条件",
-    "prefix": "…本节讲",
-    "suffix": "，必须都满足",
-    "offset": 128 } }
+    "type": "text", "quote": "中值定理的三个条件",
+    "prefix": "…本节讲", "suffix": "，必须都满足", "offset": 128 } }
 
-// 单图上的框选：rect 为归一化坐标 [x, y, w, h]，0..1，与显示尺寸无关
+// 单图框选：rect 归一化 [x, y, w, h]，0..1，与显示尺寸无关
 { "kind": "image", "anchor": {
-    "type": "rect",
-    "capture_id": "cap_01H…",
-    "rect": [0.12, 0.31, 0.44, 0.18] } }
+    "type": "rect", "capture_id": "cap_01H…", "rect": [0.12, 0.31, 0.44, 0.18] } }
 ```
-
-`rect` 归一化的理由：缩略图与原图分辨率不同，坐标必须与显示无关；前端按 `element.clientWidth` 换算。
 
 ---
 
@@ -189,50 +216,53 @@ CREATE INDEX idx_messages_note  ON messages(note_id, created_at);
 src/driver_platform/plugins/pho_note/
   __init__.py        # 导出 PhoNotePlugin
   plugin.py          # class PhoNotePlugin(Plugin): plugin_id="pho_note", version="0.1.0"
-  store.py           # SQLite + 文件，纯同步；所有 SQL 只在这里
+  store.py           # SQLite + 文件；所有 SQL 只在这里（含树操作、防环）
   tools.py           # 每个工具一个 Tool 子类
   llm.py             # Provider 协议 + openai / anthropic / manual
+  webdav.py          # WebDAV 客户端（httpx）
   api.py             # 给桌面壳用的 REST router（不进工具表）
   web/               # 可选：无构建静态页（浏览器兜底，默认关）
 ```
 
-`Plugin.tools()` 返回下列工具；`contract_version = "1.0"`。
+`contract_version = "1.0"`。
 
 | 工具 | 作用 | 关键入参 |
 |------|------|----------|
-| `note_add_capture` | 登记一张图进缓冲区（幂等：同 sha256 直接返回已有） | `image_b64` \| `image_url`、`source`、`app_title` |
-| `note_list_captures` | 列缓冲区 | `unused_only`、`course_id`、`limit` |
-| `note_course_upsert` | 建/改课程 | `course_id?`、`name`、`instructor?` |
-| `note_course_list` | 课程树（含每课笔记数） | `include_archived` |
-| `note_compose` | **任意多张** Capture 组成新笔记 | `capture_ids[]`、`title`、`course_id` |
-| `note_list` / `note_get` | 列表（按课程/关键词）/ 详情（正文+图+批注+版本） | `course_id?`、`q?`；`note_id` |
-| `note_update` | 改标题/正文/课程（自动拍 Revision） | `note_id`、`title?`、`body_md?`、`course_id?` |
-| `note_delete` | 删笔记（默认不删图，`purge_images=true` 才删） | `note_id`、`purge_images` |
-| `note_attach_capture` | 给已有笔记追加图 | `note_id`、`capture_ids[]`、`position?` |
-| `note_detach_capture` | 从笔记移除图（图片留在缓冲区） | `note_id`、`capture_id` |
-| `note_annotate` | 加批注（三种锚） | `note_id`、`kind`、`anchor`、`body_md`、`color?` |
-| `note_annotate_delete` | 删批注 | `note_id`、`annotation_id` |
-| `note_summarize` | 生成/重写总结（落新 Revision） | `note_id`、`style`（`outline`/`exam`/`brief`） |
+| `note_tree` | 整棵树（嵌套 + 每节点笔记/图片/批注计数） | `max_depth?` |
+| `note_node_create` | 建文件夹或空笔记 | `parent_id?`、`kind`、`name` |
+| `note_node_rename` | 改名 | `node_id`、`name` |
+| `note_node_move` | 移动/排序（防环） | `node_id`、`new_parent_id?`、`position?` |
+| `note_node_delete` | 删（文件夹默认递归） | `node_id`、`recursive` |
+| `note_add_capture` | 登记截图进缓冲区（同 sha256 幂等） | `image_b64` \| `image_url`、`source`、`app_title` |
+| `note_list_captures` | 列缓冲区 | `limit`、`since?` |
+| `note_compose` | **任意多张** Capture → 新笔记节点 | `parent_id?`、`capture_ids[]`、`title`、`body_md?` |
+| `note_get` / `note_list` | 详情（正文+图+批注+版本）/ 按名字搜笔记 | `note_id`；`q`、`limit` |
+| `note_update` | 改标题/正文（自动拍 Revision） | `note_id`、`name?`、`body_md?` |
+| `note_attach_capture` / `note_detach_capture` | 给笔记加/减图（图留在缓冲区） | `note_id`、`capture_id(s)` |
+| `note_annotate` / `note_annotate_delete` | 加/删批注（三种锚） | 见 §4.1 |
+| `note_summarize` | 生成/重写总结（落新 Revision） | `note_id`、`style` |
 | `note_chat` | 讨论区一轮对话 | `note_id`、`message`、`stream?` |
-| `note_apply_patch` | 应用 AI 建议（find/replace） | `note_id`、`edits[]`、`reason` |
-| `note_ingest_ai_reply` | **manual 模式**：把网页版回答灌回来 | `note_id`、`text`、`as`（`summary`/`patch`/`message`） |
-| `note_revisions` / `note_rollback` | 版本列表 / 回滚 | `note_id`；`note_id`、`revision_id` |
-| `note_export` | 导出 Markdown（含图片相对路径），可 zip | `note_id`、`format` |
-| `note_backup` | 把数据目录打包到 `backups/` | `label?` |
+| `note_apply_patch` | 应用 AI 的 find/replace 建议 | `note_id`、`edits[]` |
+| `note_ingest_ai_reply` | manual 模式：灌回网页版回答 | `note_id`、`text`、`as` |
+| `note_revisions` / `note_rollback` | 版本列表 / 回滚 | `note_id`；`+revision_id` |
+| `note_export` | 导出 Markdown（按树还原目录）/ zip | `node_id?`、`format` |
+| `note_backup` | 打包数据目录到 `backups/` | `label?` |
+| `note_sync_push` / `note_sync_pull` | WebDAV 推送 / 拉取（§9） | `dry_run?` |
+| `note_sync_status` | 上次同步时间、manifest 摘要、待上传数 | — |
 
-### 4.1 两个接口示例（Agent 真正看到的契约）
+### 4.1 两个接口示例
 
 ```json
-{ "name": "note_compose", "contract_version": "1.0",
-  "description": "把若干张已截取的图片组成一条笔记。图片来自缓冲区（note_id 为空的 captures）。",
+{ "name": "note_node_move", "contract_version": "1.0",
+  "description": "把节点移动到某个文件夹下，可选指定同层位置。移动到自身后代会被拒绝。",
   "input_schema": {
     "type": "object",
     "properties": {
-      "capture_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-      "title":       { "type": "string", "minLength": 1 },
-      "course_id":   { "type": "string" }
+      "node_id":       { "type": "string" },
+      "new_parent_id": { "type": ["string", "null"] },
+      "position":      { "type": "integer", "minimum": 0 }
     },
-    "required": ["capture_ids", "title"],
+    "required": ["node_id"],
     "additionalProperties": false } }
 ```
 
@@ -252,53 +282,62 @@ src/driver_platform/plugins/pho_note/
     "additionalProperties": false } }
 ```
 
-### 4.2 错误码（沿用平台 `code` + `status_code` 表）
+### 4.2 错误码
 
 | code | 状态 | 场景 |
 |------|------|------|
-| `note_not_found` | 404 | 笔记 / 图片 / 版本不存在 |
-| `ai_not_configured` | 400 | 调了 `note_summarize`/`note_chat` 但 `DRIVER_NOTES_LLM=off` |
-| `ai_unavailable` | 502 | provider 超时、返回非 2xx、返回内容不是契约 JSON |
-| `ai_reply_unparsable` | 422 | manual 灌回的回答解析不出 edits/summary |
+| `note_not_found` | 404 | 节点 / 图片 / 版本不存在 |
+| `node_move_invalid` | 422 | 移到自身或后代；`new_parent` 不是文件夹 |
+| `node_name_conflict` | 409 | 同层重名（自动加序号失败时） |
+| `ai_not_configured` | 400 | 调了 AI 工具但 `DRIVER_NOTES_LLM=off` |
+| `ai_unavailable` | 502 | provider 超时 / 非 2xx |
+| `ai_reply_unparsable` | 422 | manual 灌回的回答解析不出 summary/edits |
+| `sync_not_configured` | 400 | 没配 WebDAV |
+| `sync_failed` | 502 | WebDAV 返回非 2xx（详情带方法/路径/状态码） |
 
-其余一律复用：`invalid_arguments`(422)、`permission_denied`(403)、`tool_not_found`(404)。
+其余复用：`invalid_arguments`(422)、`permission_denied`(403)、`tool_not_found`(404)。
 
 ### 4.3 REST 端点（给桌面壳，不进工具表）
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
-| `POST` | `/notes/api/captures` | `multipart/form-data` 上传截图（壳用），返回 capture 元数据 |
-| `GET` | `/notes/api/captures/{id}/image` | 原图（`Cache-Control: immutable`，内容按 sha256 寻址） |
-| `GET` | `/notes/api/captures/{id}/thumb` | 缩略图 |
-| `GET` | `/notes/api/tree` | 课程 → 笔记树（一次拿全，省 N+1） |
-| `GET` | `/notes/api/notes/{id}` | 笔记详情（正文 + 图 + 批注 + 最近 N 版本） |
-| `PATCH` | `/notes/api/notes/{id}` | 改正文/标题（自动 Revision） |
-| `POST` | `/notes/api/notes/{id}/chat` | 讨论区（`stream=true` 时 SSE） |
+| `GET` | `/notes/api/tree` | 文件树（嵌套，含计数） |
+| `POST` | `/notes/api/nodes` | 建文件夹/笔记 |
+| `PATCH` | `/notes/api/nodes/{id}` | 改名 / 改正文（自动 Revision） |
+| `POST` | `/notes/api/nodes/{id}/move` | 移动 / 排序 |
+| `DELETE` | `/notes/api/nodes/{id}?recursive=` | 删除 |
+| `GET` | `/notes/api/notes/{id}` | 笔记详情（正文+图+批注+最近版本+消息） |
+| `POST` | `/notes/api/captures` | `multipart/form-data` 上传截图 |
+| `GET` | `/notes/api/captures/{id}/image` \| `/thumb` | 原图 / 缩略图（`immutable` + sha256 寻址） |
+| `POST` | `/notes/api/notes/{id}/chat` | 讨论（`stream=true` 走 SSE） |
 | `POST` | `/notes/api/notes/{id}/apply` | 应用 edits |
 | `GET` | `/notes/api/notes/{id}/export` | Markdown / zip |
-| `POST` | `/notes/api/backup` | 打包 `backups/` |
+| `POST` | `/notes/api/backup` | 打包备份 |
+| `POST` | `/notes/api/sync/push` \| `/pull` | WebDAV 同步 |
+| `GET` | `/notes/api/sync/status` | 同步状态 |
 
-**为什么 REST 与工具两套入口**：工具给 Agent（要 schema、要审计、要走统一错误信封），REST 给界面（要 multipart 上传大图、要流式、要字节级缓存）。二者共用 `store.py`，业务逻辑只有一份。
+**为什么两套入口**：工具给 Agent（schema + 审计 + 统一错误信封），REST 给界面（multipart 传大图、SSE、字节级缓存）。二者共用 `store.py`，业务逻辑只有一份。
 
-**UI 挂载策略（不改插件契约）**：`Plugin` 现在只有 `tools()/setup()/teardown()`，没有挂载路由的能力。只有一个插件需要 UI，**不值得为此抽象契约**；由 `main.py` 显式挂载：
+**UI 挂载不改插件契约**：只有一个插件需要 UI，不值得为它抽象契约；由 `main.py` 显式挂载 4 行：
 
 ```python
-# main.py，新增 4 行
 if resolved.notes_enabled and resolved.notes_ui:
     from driver_platform.plugins.pho_note.api import build_notes_router
     app.include_router(build_notes_router(resolved))   # 内部已挂 /notes/api + 鉴权依赖
 ```
 
-等第二个需要界面的插件出现，再把这条提升成 `Plugin.web()`（契约 1.1）。
+等第二个需要界面的插件出现，再提升成 `Plugin.web()`（契约 1.1）。
+
+**作用域是精确匹配、没有前缀通配**（`*` 只代表全权），所以两把钥匙都要把工具名逐个列全，见 §10。
 
 ---
 
-## 5. 截图管线（壳里最核心的一段）
+## 5. 截图管线
 
-快捷键 → 静默取帧 → 上传 → 落缓冲区，全程不打断听课。Electron 里的真实调用链：
+快捷键 → 静默取帧 → 上传 → 落缓冲区，全程不打断听课。
 
 ```js
-// main.js —— 注册系统级热键（任何窗口前台都有效）
+// main.js
 const { globalShortcut, desktopCapturer, session } = require('electron')
 
 app.whenReady().then(() => {
@@ -306,71 +345,116 @@ app.whenReady().then(() => {
 })
 
 async function captureNow() {
-  // 1) 静默选定主屏，避免弹"选择共享内容"对话框
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
-  const primary = sources[0]
-
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'], thumbnailSize: { width: 0, height: 0 }
+  })
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
-    cb({ video: primary })          // 只给主屏，且不给音频
+    cb({ video: sources[0] })            // 静默选主屏，不弹选择框
   }, { useSystemPicker: false })
 
-  // 2) 让隐藏的抓帧窗口拿一帧原始分辨率画面
-  const res = await frameWindow.grabOnce()   // 内部: getDisplayMedia({video:{width:{ideal:3840}}}) → ImageCapture → canvas
-  // 3) 上传（multipart，字段名 file），带上前台窗口标题便于认课
-  const meta = await api.upload('/notes/api/captures', { blob: res.blob, app_title: res.foregroundTitle })
+  const frame = await frameWindow.grabOnce()   // getDisplayMedia → ImageCapture → canvas
+  const meta = await api.upload('/notes/api/captures', {
+    blob: frame.blob, app_title: frame.foregroundTitle
+  })
   notify(`已入缓冲区（${meta.width}×${meta.height}）`)
 }
 ```
 
-要点与坑：
+坑与对策：
 
-1. **分辨率**：`desktopCapturer.getSources` 的 `thumbnail` 会被缩放；要原始像素必须 `getDisplayMedia` 抓流后 `ImageCapture`/`canvas` 取帧（本设计走这条）。
-2. **多显示器**：枚举 `sources`，热键默认主屏；`Ctrl+Shift+D` 切下一块屏；配置项记忆选择（`settings.json`）。
-3. **DPI 缩放**：Windows 缩放 125%/150% 时 `getDisplayMedia` 给的是物理像素，尺寸以实际帧为准，不要用 `screen.getPrimaryDisplay().size`。
-4. **剪贴板兜底**：`globalShortcut` 注册失败（被别的软件占用）或用户用 `Win+Shift+S` 时，监听窗口 `paste` 事件直接吃剪贴板图片。
-5. **不弹窗打断**：截图后只发一个 3 秒托盘通知，缓冲区在图片区里标记"新增"。**不要**每次截图都强制切到 PhoNote 窗口——这是这类工具最容易做错的地方。
+1. **分辨率**：`desktopCapturer.getSources` 的 `thumbnail` 是缩放图；要原始像素必须 `getDisplayMedia` 抓流后取帧（走这条）。
+2. **多显示器**：热键默认主屏，`Ctrl+Shift+D` 切下一块；选择记在 `settings.json`。
+3. **高 DPI**：以实际帧尺寸为准，不要用 `screen.getPrimaryDisplay().size`。
+4. **热键被占用**：注册失败就提示，并启用"剪贴板兜底"（监听 `paste` 吃 `Win+Shift+S` 的图）。
+5. **不打断**：只发 3 秒托盘通知，不强制切窗口——这类工具最容易做错的地方。
 6. **隐私**：截图只在本地与自己的平台之间流动；`manual` 模式下也只有你主动复制才离开本机。
 
 ---
 
-## 6. 四分区界面
+## 6. 四分区界面 + 树的导航
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ PhoNote   课程: [高数 · 第 3 讲 ▾]      Ctrl+Shift+S 截图   ⚙   [备份]   ● 在线 │
-├──────────────┬──────────────────────────────────┬──────────────────────────────┤
-│ ① 图片区      │ ③ 现有笔记区                      │ ④ 讨论区                      │
-│              │                                  │                              │
-│ 未归档 3 张   │ # 中值定理                        │ 你：把第二段的证明补全        │
-│ ┌──┐┌──┐┌──┐ │                                   │ AI：好的，补充如下…           │
-│ │  ││  ││  │ │ 若 f 在 [a,b] 连续 …[1]          │ ─────────────────────        │
-│ └──┘└──┘└──┘ │                                   │ [应用修改] [重答] [复制]      │
-│ [组成笔记]    │ [1] 老师强调这三个条件必须同时满足 │                              │
-│              │                                   ├──────────────────────────────┤
-│ 本课 12 张    │ ─────────────────────────────     │ ② 批注区                      │
-│ ┌──┐┌──┐┌──┐ │ ✎ 编辑    🕘 版本   ⤓ 导出        │ · 图1 框选「ε-δ」：这里没听懂 │
-│ │  ││  ││  │ │                                   │ · 正文[1]：考试重点           │
-│ └──┘└──┘└──┘ │                                   │ [+ 新批注]                    │
-└──────────────┴──────────────────────────────────┴──────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│ PhoNote   Ctrl+Shift+S 截图   Ctrl+Shift+D 切屏   ⟳ 同步   ⚙   [备份]      ● 在线     │
+├────────────┬──────────────┬──────────────────────────────────┬──────────────────────┤
+│ 文件树      │ ① 图片区      │ ③ 现有笔记区                      │ ④ 讨论区              │
+│ (导航，可折叠)│              │                                  │                      │
+│ ▾ 高数      │ 未归档 3 张   │ # 中值定理                        │ 你：把第二段证明补全  │
+│  ▾ 第3讲    │ ┌──┐┌──┐┌──┐ │                                   │ AI：好的，补充如下…   │
+│   · 中值定理 │ │  ││  ││  │ │ 若 f 在 [a,b] 连续…[1]           │ ───────────────────  │
+│   · 罗尔定理 │ └──┘└──┘└──┘ │                                   │ [应用修改] [重答]     │
+│ ▸ 线代      │ [组成笔记]    │ [1] 老师强调三个条件必须同时满足   ├──────────────────────┤
+│            │              │ ─────────────────────────         │ ② 批注区              │
+│ ═══ 拖拽可改 │ 本笔记 4 张   │ ✎ 编辑   🕘 版本   ⤓ 导出          │ · 图1 框选「ε-δ」：没听懂│
+│ ＋ 新建      │ ┌──┐┌──┐     │                                   │ · 正文[1]：考试重点   │
+│            │ │  ││  │     │                                   │ [+ 新批注]            │
+└────────────┴──────────────┴──────────────────────────────────┴──────────────────────┘
 ```
 
 | 区 | 数据来源 | 写操作 | 交互要点 |
 |----|----------|--------|----------|
-| ① 图片区 | `GET /notes/api/tree` + `/captures` | 拖拽调整、多选 `POST /notes/api/notes`（compose） | 多选框 + 「组成笔记」；已入笔记的图显示所属笔记角标；右键「删除/下载」 |
-| ③ 笔记区 | `GET /notes/api/notes/{id}` | `PATCH`（防抖 800 ms 自动存）、版本切换、导出 | 预览/编辑双态；批注以角标 `[n]` 内联；版本对比用左右 diff |
-| ④ 讨论区 | `GET /notes/{id}` 里的 messages | `POST /chat`（SSE）、`/apply` | AI 回复里的 `edits` 渲染成「建议卡片」，逐条勾选应用；保留原始消息 |
-| ② 批注区 | 同笔记详情 | `POST/DELETE annotations` | 选中文本/框选图片后浮出"加批注"按钮；点击批注滚动定位并高亮锚点 |
+| 树 | `GET /notes/api/tree` | `POST/PATCH/DELETE nodes`、`POST .../move` | 拖拽移动/排序；右键菜单（新建文件夹/笔记、重命名、删除）；只读钥匙下隐藏全部写入口 |
+| ① 图片区 | tree + captures | 多选 `POST /notes/api/notes`（compose） | 多选框 +「组成笔记」；已入笔记的图显示所属笔记角标 |
+| ③ 笔记区 | `GET /notes/api/notes/{id}` | `PATCH`（防抖 800 ms 自动存）、版本、导出 | 预览/编辑双态；批注角标内联；版本左右 diff |
+| ④ 讨论区 | 笔记详情里的 messages | `POST /chat`（SSE）、`/apply` | AI 回复里的 edits 渲染成「建议卡片」，逐条勾选应用 |
+| ② 批注区 | 同笔记详情 | `POST/DELETE annotations` | 选中文本/框选图片后浮出"加批注"；点击批注滚动定位并高亮锚点 |
 
-布局自适应：窄窗（<1200px）时 ② 收进右侧抽屉，① 变成顶部横条。
+树是**导航区**（不算第五个"不可或缺的区"），宽窗常驻；窄窗（<1100px）收进左侧抽屉。② 在窄窗变成右侧抽屉。
 
 ---
 
-## 7. AI 接入
+## 7. 同步（WebDAV）
 
-### 7.1 Provider 协议
+### 7.1 远端布局
+
+```
+<remote>/phonote/manifest.json                     # 提交点：最后写
+<remote>/phonote/db/phonote-20261110-2130.db.zip   # VACUUM INTO 快照，保留最近 N 份
+<remote>/phonote/media/ab/cd/<sha256>.webp         # 内容寻址，天然去重
+```
+
+```jsonc
+// manifest.json
+{
+  "format": "phonote/1",
+  "generated_at": "2026-11-10T21:30:12Z",
+  "device": "desk-win",
+  "db": { "path": "db/phonote-20261110-2130.db.zip", "sha256": "…", "bytes": 183422 },
+  "media": [ { "sha256": "ab12…", "bytes": 84120 }, … ]
+}
+```
+
+### 7.2 push / pull
+
+| 动作 | 步骤 |
+|------|------|
+| **push** | ① `MKCOL` 补齐目录（已存在返回 405 视为成功）② `GET manifest.json`（可选，拿远端已有 sha256 集合）③ 只 `PUT` 缺失的图片（按 sha256 文件名，重复上传无副作用）④ `VACUUM INTO` 出快照并压缩 ⑤ `PUT` 快照 ⑥ **最后 `PUT` manifest.json** —— 提交点，前五步中断不会污染远端 |
+| **pull** | ① `GET manifest.json` ② 若本地有未推送改动（`updated_at > manifest.generated_at`）→ 拒绝，`--force` 才继续（先 `note_sync_push`）③ 下载快照到临时文件、校验 sha256 ④ 备份当前库到 `backups/` ⑤ 原子替换（`os.replace`）⑥ 按 manifest 补拉缺失图片 ⑦ 打开 WAL、跑迁移检查 |
+
+### 7.3 配置与安全
+
+```
+DRIVER_NOTES_WEBDAV_URL=https://dav.jianguoyun.com/dav/PhoNote
+DRIVER_NOTES_WEBDAV_USER=me@example.com
+DRIVER_NOTES_WEBDAV_PASSWORD=...        # 只从环境变量读，绝不进 DB、绝不进日志
+DRIVER_NOTES_WEBDAV_KEEP=5              # 远端保留的数据库快照份数
+```
+
+壳侧只提供"现在同步 / 每 N 分钟自动同步"；令牌/密码存 `%APPDATA%\PhoNote\settings.json`（不进仓库、不进导出）。
+
+### 7.4 不做（明确）
+
+- 不做双向字段级合并：两台设备同时编辑同一篇会丢其中一份，**约定单主设备**（文档与 UI 都要写这句话）；
+- 不做实时协同（CRDT）、不做冲突 UI；
+- 不传 `exports/`、不传缩略图（可本地重建）。
+
+---
+
+## 8. AI 接入
+
+### 8.1 Provider 协议
 
 ```python
-# llm.py
 class Message(TypedDict):
     role: Literal["system", "user", "assistant"]
     content: str
@@ -390,149 +474,158 @@ class LLMProvider(Protocol):
     ) -> str: ...
 ```
 
-三个实现：
-
 | 实现 | 何时用 | 关键点 |
 |------|--------|--------|
 | `OpenAICompatibleProvider` | `DRIVER_NOTES_LLM=openai` | 一把 `base_url` 覆盖 DeepSeek / 通义 / Kimi / Ollama / vLLM；多模态用 `image_url` + `data:` URI |
 | `AnthropicProvider` | `DRIVER_NOTES_LLM=anthropic` | `messages` + `image`(base64) 块；system 单独字段 |
-| `ManualProvider` | `DRIVER_NOTES_LLM=manual` | **不联网**：把上下文包成文本返回（见 7.3），由用户粘贴到网页版 |
-
-配置（默认全关）：
+| `ManualProvider` | `DRIVER_NOTES_LLM=manual` | **不联网**：把上下文包成文本返回，由用户粘到网页版 |
 
 ```
 DRIVER_NOTES_LLM=off|openai|anthropic|manual
 DRIVER_NOTES_LLM_BASE_URL=https://api.deepseek.com/v1
 DRIVER_NOTES_LLM_API_KEY=...
 DRIVER_NOTES_LLM_MODEL=deepseek-chat
-DRIVER_NOTES_LLM_MAX_IMAGES=6          # 单次喂给模型的最大图片数
-DRIVER_NOTES_LLM_MAX_PX=1024           # 送模型前的长边上限（另存原图）
+DRIVER_NOTES_LLM_MAX_IMAGES=6
+DRIVER_NOTES_LLM_MAX_PX=1024
 ```
 
-### 7.2 让 AI "修改"而不是"重写全文"
+### 8.2 让 AI "修改"而不是"重写全文"
 
-模型统一输出 **edits 协议**（增量补丁），平台负责校验与应用：
+模型统一输出增量补丁：
 
 ```json
 { "summary": "本节课讲了中值定理的三个条件与两个推论。",
-  "edits": [
-    { "find": "若 f 在 [a,b] 连续", "replace": "若 f 在闭区间 [a,b] 上连续，在开区间 (a,b) 内可导" }
-  ] }
+  "edits": [ { "find": "若 f 在 [a,b] 连续",
+               "replace": "若 f 在闭区间 [a,b] 上连续，在开区间 (a,b) 内可导" } ] }
 ```
 
-- `find` 必须在正文里**唯一出现**，否则该条标记为"未应用"交给人处理；
-- 应用成功 → 拍 Revision（`reason='ai_patch'`）→ 可一键回滚；
-- 比"让模型重写全文"省 token、可审计、diff 干净；也避免模型顺手删掉你写的批注段落。
+- `find` 必须在正文里**唯一出现**，否则该条标记"未应用"交给人处理；
+- 应用成功 → 拍 Revision（`reason='ai_patch'`）→ 可回滚；
+- 提示词固定约束：只改命中片段、不动标题层级、保留 `[n]` 批注角标。
 
-提示词里要固定约束：只改 `find` 命中的片段、不新增标题层级改变、保留 `[n]` 批注角标。
+### 8.3 manual 模式
 
-### 7.3 manual 模式（网页版免费/付费都能用）
-
-`note_summarize` 在 manual 下返回的不是总结，而是**上下文包**：
+`note_summarize` 返回**上下文包**而不是总结：
 
 ```json
 { "mode": "manual",
   "bundle": {
-    "prompt": "你是我的复习助手。下面是《高数》第 3 讲的课件截图与我的批注…请按「定义 / 定理 / 易错点」三节总结，输出 JSON：{summary, edits}。",
+    "prompt": "你是我的复习助手…请按「定义 / 定理 / 易错点」三节总结，输出 JSON：{summary, edits}。",
     "note_md": "…当前正文…",
     "annotations": ["…"],
     "images": ["cap_01H…（第 1 张）", "cap_01H…（第 2 张）"]
   },
-  "copy_text": "（完整可粘贴文本，含图片编号说明）",
+  "copy_text": "（完整可粘贴文本）",
   "image_dir": "D:\\PhoNote\\exports\\note_xxx\\" }
 ```
 
-流程：壳把 `copy_text` 放进剪贴板 + 打开导出目录（图片已复制好，可一拖进对话）→ 你贴给 ChatGPT/Claude 网页版 → 把回答复制回来 → `note_ingest_ai_reply(note_id, text="…", as="auto")` 解析成 summary/edits 并预览应用。
+流程：壳复制 `copy_text` + 打开导出目录 → 你贴给网页版 → 回答复制回来 → `note_ingest_ai_reply(note_id, text, as="auto")` 解析并预览应用。
 
-为什么不做网页版自动化：没有官方 API，无头浏览器驱动既违反条款又会随前端改版而碎。**manual 是唯一能长期稳定的"免费"路径**，而且永不失效。
+理由：网页版没有官方 API，无头浏览器驱动既违反条款又会随前端改版而碎。**manual 是唯一能长期稳定的免费路径。**
 
-### 7.4 成本与上下文控制
+### 8.4 成本控制
 
-1. 送模型的图先缩到长边 1024（WebP q=0.8），原图不参与；
-2. 单次最多 `MAX_IMAGES=6`；更多时按"每 6 张先局部总结，再合并"（map-reduce，两次调用）；
-3. 正文超过 8k 字符时只送"标题行 + 与问题最相关的段落"（用简单关键词打分，不引入 embedding）；
-4. 每次调用把 `tokens_in/out` 写进 `messages`（可选字段），便于月度成本复盘。
+图片送模型前缩到长边 1024（WebP q=0.8）；单次最多 6 张；超过则"每 6 张先局部总结再合并"（map-reduce）；正文超 8k 字符时只送标题行 + 关键词命中的段落。
 
 ---
 
-## 8. 存储、备份与迁移
+## 9. 存储、备份与迁移
 
 ```
-D:\PhoNote\                        # DRIVER_NOTES_DIR，独立目录
+D:\PhoNote\                        # DRIVER_NOTES_DIR
 ├── phonote.db                     # SQLite（WAL）
-├── media\2026\11\<sha256>.webp    # 原图（按内容寻址，天然去重）
-├── thumbs\<sha256>.webp           # 缩略图（长边 320）
-├── exports\note_<id>\             # manual 模式的图片清单 + prompt.txt
+├── media\ab\cd\<sha256>.webp      # 内容寻址原图（默认长边 1600，不保留原始分辨率）
+├── thumbs\<sha256>.webp           # 缩略图（长边 320，本地重建）
+├── exports\node_<id>\             # manual 模式的图片清单 + prompt.txt
 └── backups\phonote-20261110-2130.zip
 ```
 
-- **备份**：`note_backup` 用 `zipfile` 把 `phonote.db`（先 `VACUUM INTO` 一份一致性快照）+ `media/` 打包；不打包 `exports/`。
-- **恢复**：解开到新目录 → 改 `DRIVER_NOTES_DIR` 指向它即可（路径都是相对 `media/` 的，可整体搬迁）。
-- **迁移**：`PRAGMA user_version` 顺序升级；每步一个函数 + 一条测试（用 `tmp_path` 建 v1 库升到当前版本再断言）。
-- **并发**：WAL + 单写者。壳与平台分离时，只有平台进程写库，壳只读缓存。
+- **备份**：`VACUUM INTO` 一致性快照 + `media/` 打包；不打包 `exports/`。
+- **恢复**：解压到新目录 → 改 `DRIVER_NOTES_DIR` 指向它即可（路径都相对 `media/`）。
+- **迁移**：`PRAGMA user_version` 顺序升级，每步一个函数 + 一条测试（建 v1 库升到当前版本再断言）。
+- **并发**：WAL + 单写者；壳只读缓存，写永远经平台。
 
 ---
 
-## 9. 与驱动平台的对齐（几乎白拿）
+## 10. 鉴权：两把钥匙
+
+```bash
+# 主设备（读写）：截图上传、组笔记、改正文、批注、AI、同步
+DRIVER_API_KEYS="pho-rw:note_tree|note_get|note_list|note_node_create|note_node_rename|note_node_move|note_node_delete|note_add_capture|note_list_captures|note_compose|note_update|note_attach_capture|note_detach_capture|note_annotate|note_annotate_delete|note_summarize|note_chat|note_apply_patch|note_ingest_ai_reply|note_revisions|note_rollback|note_export|note_backup|note_sync_push|note_sync_pull|note_sync_status"
+
+# 只读设备（第二台电脑 / 投屏 / 给 Agent 看）：只能浏览与导出
+DRIVER_API_KEYS="...,pho-ro:note_tree|note_get|note_list|note_list_captures|note_export|note_sync_status"
+```
+
+- 作用域**精确匹配**，`*` 只代表"全权"，没有前缀通配 → 必须逐个列（上面已列全）。
+- 壳的设置里选钥匙；`readonly=true` 时隐藏树/笔记的写入口、禁用截图热键、讨论区只读。
+- 只读钥匙调写工具 → 403 `permission_denied`，`details` 里会列出"需要作用域"。
+
+---
+
+## 11. 与驱动平台的对齐
 
 | 机制 | 用法 |
 |------|------|
-| 鉴权 | 工具名即作用域，精确匹配：`DRIVER_API_KEYS="pho-key:note_get\|note_list\|note_export,full-key"` |
 | 错误信封 | `raise PlatformError(...)` → `{"error":{code,message,details,request_id}}` |
 | 可观测性 | 自动获得 `driver_tool_calls_total{tool="note_compose"}` 与 `tool_call` 日志 |
-| 特性开关 | `DRIVER_NOTES_ENABLED=0`、`DRIVER_NOTES_UI=0`（UI 端点默认关，壳走 REST 时再开） |
-| 存储位置 | `DRIVER_NOTES_DIR`（默认 `D:\PhoNote`；容器里映射 `/data/phonote`） |
+| 特性开关 | `DRIVER_NOTES_ENABLED=0`、`DRIVER_NOTES_UI=0` |
+| 存储 | `DRIVER_NOTES_DIR`（默认 `D:\PhoNote`；容器里映射 `/data/phonote`） |
 | 契约 | `contract_version="1.0"`；加可选字段=minor，删字段/改语义=major |
 
 ---
 
-## 10. 分期路线（每期都可验收）
+## 12. 分期路线
 
-| 期 | 范围 | 验收（可执行的判据） |
-|----|------|----------------------|
-| **P0** | 仓库骨架 + 平台插件三个工具（`note_add_capture`/`note_compose`/`note_get`）+ `store.py` + DB 迁移 v1；Electron 壳能注册热键、静默截主屏、上传、图片区显示 | `pytest tests/test_pho_note_store.py tests/test_pho_note_tools.py` 全绿；壳里按 `Ctrl+Shift+S` 后图片区出现缩略图，`GET /v1/tools` 能看到三个工具；重启后数据还在 |
-| **P1** | 课程树 + 笔记 CRUD + 四分区（可编辑）+ 文本/图片批注 + 自动 Revision | 手工走完：建课 → 截 3 张 → 组笔记 → 改正文 → 加两种批注 → 重启 → 内容与角标都在；`note_rollback` 能回到上一版 |
-| **P2** | `note_summarize` + 讨论区 + edits 应用 + 版本 diff | 一次真实总结落成 Revision；AI 给 2 条 edits，1 条应用、1 条故意给不唯一 `find` 并正确标"未应用"；回滚验证 |
-| **P3** | manual 模式 + 备份/恢复 + 导出 + 多显示器/窗口选择 + 托盘与设置页 | 断网下走完 manual 全流程；`backup` 出 zip，解压到新目录换 `DRIVER_NOTES_DIR` 后数据完整 |
+| 期 | 范围 | 验收 |
+|----|------|------|
+| **P0** | 仓库骨架 + 插件（`store.py` + 树三个工具 + `note_add_capture`/`note_compose`/`note_get`）+ 迁移 v1；Electron 壳：热键、静默截主屏、上传、树 + 图片区渲染 | `pytest` 全绿；按 `Ctrl+Shift+S` 后图片区出缩略图；`GET /v1/tools` 能看到工具；重启数据还在 |
+| **P1** | 树完整 CRUD（含拖拽、防环、同层重排）+ 笔记编辑 + 四分区 + 文本/图片批注 + 自动 Revision + 只读钥匙模式 | 建三层树、拖动不出错、移到自身后代被拒；两种批注角标重启后仍在；只读钥匙隐藏写入口 |
+| **P2** | `note_summarize` + 讨论区 + edits 应用 + 版本 diff | 一次真实总结落 Revision；2 条 edits 中 1 条应用、1 条因 `find` 不唯一正确标"未应用"；回滚验证 |
+| **P3** | WebDAV 同步 + 备份/恢复 + manual 模式 + 多显示器/窗口选择 + 设置页 | 断网走完 manual 全流程；push 后在另一目录 pull 还原出同样的树与图片；备份 zip 可恢复 |
 
-P0 建议一次提交：`feat(pho-note): 截图入缓冲区到笔记的最小闭环`。
+P0 建议一次提交：`feat(pho-note): 截图入缓冲区到组成笔记的最小闭环`。
 
 ---
 
-## 11. 风险与已知限制
+## 13. 风险与已知限制
 
 | 风险 | 影响 | 应对 |
 |------|------|------|
-| Electron 首次 `npm install` / 打包需外网 | 装不上就开不了发 | 先配国内镜像；`electron-builder` 只做最终打包，开发期 `npm start` 即可 |
-| 全局热键被占用 | 快捷键无反应 | 注册失败即提示并提供"剪贴板兜底"；设置页可改键 |
-| 多显示器 + 高 DPI | 截图分辨率/坐标错 | 以实际帧尺寸为准；`rect` 用归一化坐标（已在设计里） |
-| 截图含隐私（人脸、付费内容） | 数据泄露 | 默认只存本地；只有用户点"总结"才发送；manual 模式由人决定粘贴内容 |
-| SQLite 并发写 | 壳与平台同时写会 `SQLITE_BUSY` | 只让平台写；壳只读缓存；WAL + `busy_timeout=5000` |
-| 笔记越写越大 | 上下文超限、成本上升 | §7.4 的分段总结与截断策略；导出后归档 |
-| 平台插件默认关 | 用户装了壳却调不通 | 壳启动做一次"能力探测"（`GET /v1/tools` 看有没有 `note_*`），没有就给出一键配置指引 |
+| Electron 首次 `npm install` / 打包需外网 | 装不上就开不了发 | 配国内镜像；开发期 `npm start`，打包最后做 |
+| 全局热键被占用 | 快捷键无反应 | 注册失败即提示 + 剪贴板兜底；设置页可改键 |
+| 多显示器 + 高 DPI | 分辨率/坐标错 | 以真实帧尺寸为准；`rect` 归一化 |
+| 截图含隐私（人脸、付费内容） | 数据泄露 | 默认只存本地；只有点"总结"才发送；manual 由人决定粘贴内容 |
+| WebDAV 平台差异（不支持 MKCOL/PUT） | 同步失败 | 报 `sync_failed` 带方法/路径/状态码；只支持标准 WebDAV（坚果云/Nextcloud/群晖） |
+| 两台设备同时改 | 丢一份 | **单主设备**约定；pull 前检测本地未推送改动并拒绝 |
+| 树里同名 | 混淆 | 同层唯一 + 自动加 ` (2)` |
+| 移动成环 | 树损坏 | 移动前递归 CTE 校验，`node_move_invalid` |
+| SQLite 并发写 | `SQLITE_BUSY` | 只让平台写；WAL + `busy_timeout=5000` |
+| 笔记越写越大 | 上下文超限 | §8.4 的分段总结；导出后归档 |
+| 插件默认关 | 壳调不通 | 壳启动做能力探测（`GET /v1/tools`），缺工具就一键配置指引 |
 
-明确不做（现阶段）：多人协作、实时同步、自动录屏转写、笔记全文检索（先 `LIKE`，需要再上 FTS5）、浏览器端全局热键。
-
----
-
-## 12. 未决（不阻塞 P0）
-
-1. 多设备同步：只做"备份 zip + 手动搬"，还是接 WebDAV/OneDrive？（倾向先手动）
-2. 图片是否长期保留原图（磁盘 ×2）？默认只留 WebP 1600。
-3. 是否需要"讲次"层级（课程 → 第 3 讲 → 笔记），还是笔记标题里写讲次就够？
-4. 远程平台是否需要为壳单独发一把只读钥匙（`note_get|note_list`）以免壳持有全权钥匙？
+明确不做：多人实时协作、CRDT 合并、自动录屏转写、全文检索（先 `LIKE`，需要再上 FTS5）、浏览器端全局热键。
 
 ---
 
-## 13. 参考实现（分类；**我未逐个核实其当前维护状态与许可证**）
+## 14. 未决（不阻塞 P0）
+
+1. 图片是否对**关键节点**按次保留原图（默认全不保留，需要时 `keep_original=true`）？
+2. 树是否需要"模板"（新建笔记时自动带「定义 / 定理 / 易错点」骨架）？
+3. 远端保留几份库快照（默认 5）——按天数还是按份数清理？
+4. 是否给 Agent 单独一把更窄的钥匙（只 `note_tree|note_get`），与"只读设备钥匙"分开？
+
+---
+
+## 15. 参考实现（分类；**我未逐个核实其当前维护状态与许可证**）
 
 | 类型 | 举例 | 可借的点 |
 |------|------|----------|
-| 截图/标注 | ShareX、Flameshot、Snipaste（闭源）、PowerToys Text Extractor | 截图后的即时标注手感、快捷键默认值、剪贴板兜底 |
-| 笔记 + AI | Obsidian 的 Copilot 类插件、Logseq、SiYuan、Joplin、Trilium | 本地优先、Markdown 为真话、插件化扩展 |
+| 截图/标注 | ShareX、Flameshot、Snipaste（闭源）、PowerToys Text Extractor | 即时标注手感、快捷键默认值、剪贴板兜底 |
+| 笔记 + AI | Obsidian 的 Copilot 类插件、Logseq、SiYuan、Joplin、Trilium | 本地优先、Markdown 为真话、自由文件树 + 双链 |
 | 文档问答 | anything-llm、khoj、Reor | 分段总结 + 引用溯源（"这句来自第 3 张图"） |
 | 网页/视频摘要 | BibiGPT、Glarity、YouTube Summary | 一键摘要的交互与配额控制 |
 | MCP 生态 | 各家 obsidian/notion MCP server | **把笔记暴露成工具给 Agent** —— 正是本设计平台侧的做法 |
-| 桌面壳 | Electron + `desktopCapturer` / `globalShortcut` 官方示例 | 静默取帧与热键注册的坑 |
+| 桌面壳 | Electron `desktopCapturer` / `globalShortcut` 官方示例 | 静默取帧与热键注册的坑 |
 
 以上名称来自记忆，作为架构对照可以，不要当结论引用。
