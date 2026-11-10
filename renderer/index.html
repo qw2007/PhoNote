@@ -64,7 +64,22 @@
         <div class="pane" id="pane-discuss">
           <h2>讨论区</h2>
           <div id="discuss" class="discuss">
-            <p class="empty">P2 接入 AI 后，这里显示与模型的往来消息。</p>
+            <p class="empty">选一篇笔记后，可以在这里让 AI 总结，或直接提问。</p>
+          </div>
+          <div class="discuss-input">
+            <textarea id="discuss-input" rows="2" placeholder="问点什么，或让它改笔记……"></textarea>
+            <div class="discuss-actions">
+              <button id="discuss-send" type="button">发送</button>
+              <button id="discuss-summarize" type="button">让 AI 总结</button>
+            </div>
+          </div>
+          <div id="patch-preview" class="patch hidden">
+            <p id="patch-summary" class="patch-summary"></p>
+            <ul id="patch-edits" class="patch-edits"></ul>
+            <div class="patch-actions">
+              <button id="patch-apply" type="button">套用补丁</button>
+              <button id="patch-discard" type="button" class="secondary">丢弃</button>
+            </div>
           </div>
         </div>
       </section>

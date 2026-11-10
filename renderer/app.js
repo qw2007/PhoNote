@@ -171,6 +171,8 @@ async function openNote(noteId) {
   }
 
   renderAnnotations(note.annotations || []);
+  clearPatch();
+  await loadDiscuss();
   el('tree').querySelectorAll('.node.active').forEach((node) => node.classList.remove('active'));
   const active = el('tree').querySelector(`.node[data-id="${note.id}"]`);
   if (active) {
@@ -394,6 +396,137 @@ async function captureNow() {
   say(`已截图：${payload.capture.capture_id}`);
 }
 
+// ---------------------------------------------------------------- 讨论区（P2）
+
+let pendingEdits = [];
+
+function renderMessage(message) {
+  const row = document.createElement('div');
+  row.className = `msg msg-${message.role}`;
+  const who = document.createElement('span');
+  who.className = 'msg-who';
+  who.textContent = message.role === 'assistant' ? 'AI' : '我';
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  body.textContent = message.body;
+  row.append(who, body);
+  return row;
+}
+
+async function loadDiscuss() {
+  if (!state.openNote) {
+    return;
+  }
+  const box = el('discuss');
+  const messages = await api(
+    'GET',
+    `/notes/${encodeURIComponent(state.openNote.id)}/messages?limit=50`
+  );
+  if (!messages.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = '还没有消息。可以让 AI 总结，或直接提问。';
+    box.replaceChildren(empty);
+    return;
+  }
+  box.replaceChildren(...messages.map(renderMessage));
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearPatch() {
+  pendingEdits = [];
+  el('patch-preview').classList.add('hidden');
+  el('patch-edits').replaceChildren();
+  el('patch-summary').textContent = '';
+}
+
+function showOutcome(outcome) {
+  if (!outcome) {
+    return;
+  }
+  if (outcome.mode === 'manual') {
+    // manual 模式不调模型：把上下文包放剪贴板，用户自己贴给网页版。
+    el('patch-summary').textContent = 'manual 模式：上下文已复制，粘给网页版模型再把回复粘贴回来';
+    el('patch-edits').replaceChildren();
+    pendingEdits = [];
+    el('patch-preview').classList.remove('hidden');
+    if (outcome.copy_text) {
+      navigator.clipboard?.writeText(outcome.copy_text).catch(() => undefined);
+    }
+    return;
+  }
+  pendingEdits = Array.isArray(outcome.edits) ? outcome.edits : [];
+  el('patch-summary').textContent = outcome.summary || '（模型没有给出摘要）';
+  const list = el('patch-edits');
+  list.replaceChildren();
+  for (const edit of pendingEdits) {
+    const item = document.createElement('li');
+    const find = edit.find === '' ? '（追加到末尾）' : edit.find;
+    item.textContent = `${find} → ${edit.replace}`;
+    list.append(item);
+  }
+  // 没有补丁就别让「套用」按钮假装有活干。
+  el('patch-apply').disabled = pendingEdits.length === 0 || isReadonly();
+  el('patch-preview').classList.remove('hidden');
+}
+
+async function sendChat() {
+  requireWrite();
+  if (!state.openNote) {
+    say('先选一篇笔记');
+    return;
+  }
+  const input = el('discuss-input');
+  const message = input.value.trim();
+  if (!message) {
+    return;
+  }
+  input.value = '';
+  clearPatch();
+  const outcome = await api('POST', `/notes/${encodeURIComponent(state.openNote.id)}/chat`, {
+    message,
+  });
+  showOutcome(outcome);
+  await loadDiscuss();
+  say(outcome.mode === 'manual' ? 'manual 模式：上下文已复制' : 'AI 已回复');
+}
+
+async function summarizeNote() {
+  requireWrite();
+  if (!state.openNote) {
+    say('先选一篇笔记');
+    return;
+  }
+  clearPatch();
+  const outcome = await api('POST', `/notes/${encodeURIComponent(state.openNote.id)}/summarize`, {
+    instruction: el('discuss-input').value.trim(),
+  });
+  showOutcome(outcome);
+  await loadDiscuss();
+  say(outcome.mode === 'manual' ? 'manual 模式：上下文已复制' : 'AI 已总结');
+}
+
+async function applyPatch() {
+  requireWrite();
+  if (!state.openNote || !pendingEdits.length) {
+    return;
+  }
+  // 一次一条走 /apply：每条都自己判断「锚点唯一」，被跳过的能如实报出来。
+  let applied = 0;
+  let skipped = 0;
+  for (const edit of pendingEdits) {
+    const outcome = await api('POST', `/notes/${encodeURIComponent(state.openNote.id)}/apply`, {
+      find: edit.find,
+      replace: edit.replace,
+    });
+    applied += outcome.applied.length;
+    skipped += outcome.skipped.length;
+  }
+  clearPatch();
+  await openNote(state.openNote.id);
+  say(`补丁已套用 ${applied} 条${skipped ? `，跳过 ${skipped} 条` : ''}`);
+}
+
 // ---------------------------------------------------------------- 设置与只读
 
 function applyMode() {
@@ -404,6 +537,10 @@ function applyMode() {
   }
   el('annotation-form').querySelector('button').disabled = readonly;
   el('rollback').disabled = readonly;
+  el('discuss-send').disabled = readonly;
+  el('discuss-summarize').disabled = readonly;
+  el('patch-apply').disabled = readonly || pendingEdits.length === 0;
+  el('discuss-input').readOnly = readonly;
 }
 
 function openSettings() {
@@ -457,6 +594,10 @@ async function boot() {
   el('cfg-cancel').addEventListener('click', () => el('settings-dialog').close());
   el('open-folder').addEventListener('click', () => window.phonote.openFolder('notes'));
   el('annotation-form').addEventListener('submit', addAnnotation);
+  el('discuss-send').addEventListener('click', () => sendChat().catch(fail));
+  el('discuss-summarize').addEventListener('click', () => summarizeNote().catch(fail));
+  el('patch-apply').addEventListener('click', () => applyPatch().catch(fail));
+  el('patch-discard').addEventListener('click', clearPatch);
   el('settings-form').addEventListener('submit', saveSettings);
 
   window.phonote.onCaptured(async (payload) => {
