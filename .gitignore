@@ -1,0 +1,13 @@
+node_modules/
+dist/
+out/
+*.db
+*.db-wal
+*.db-shm
+media/
+thumbs/
+backups/
+exports/
+.env
+.DS_Store
+Thumbs.db
