@@ -2,41 +2,122 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self'" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
     <title>PhoNote</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <strong class="brand">PhoNote</strong>
-      <span id="hint" class="hint">Ctrl+Shift+S 截图 · 选图 · 组笔记</span>
+    <header class="toolbar">
+      <div class="brand">PhoNote</div>
+      <button id="capture" title="Ctrl+Shift+S">截图入缓冲区</button>
+      <button id="new-folder">新建目录</button>
+      <button id="new-note">新建笔记</button>
+      <button id="rename">改名</button>
+      <button id="delete">删除</button>
+      <button id="save">保存笔记</button>
+      <button id="export">导出 Markdown</button>
       <span class="spacer"></span>
-      <button id="capture" class="primary">截图</button>
+      <span id="mode" class="mode"></span>
+      <button id="settings">设置</button>
       <button id="open-folder">打开目录</button>
     </header>
 
-    <main class="layout">
-      <aside class="pane tree-pane">
-        <h2>笔记树</h2>
-        <div id="tree" class="tree"></div>
-      </aside>
+    <p id="status" class="status">准备就绪</p>
 
-      <section class="pane buffer-pane">
-        <h2>图片区 <small id="buffer-count"></small></h2>
-        <div id="buffer" class="buffer"></div>
-        <div class="compose">
-          <input id="title" type="text" placeholder="笔记标题" autocomplete="off" />
-          <button id="compose" class="primary">组成笔记</button>
+    <main class="layout">
+      <section class="col col-left">
+        <div class="pane" id="pane-tree">
+          <h2>文件树</h2>
+          <div id="tree" class="tree"></div>
+        </div>
+        <div class="pane" id="pane-buffer">
+          <h2>
+            图片区（缓冲区）
+            <span id="buffer-count" class="count"></span>
+          </h2>
+          <div class="buffer-actions">
+            <input id="title" type="text" placeholder="新笔记标题（取选中的图片）" />
+            <button id="compose">组成笔记</button>
+          </div>
+          <div id="buffer" class="buffer"></div>
         </div>
       </section>
 
-      <section class="pane note-pane">
-        <h2>现有笔记</h2>
-        <div id="note" class="note"><p class="muted">从左侧树里选一篇笔记。</p></div>
+      <section class="col col-center">
+        <div class="pane" id="pane-note">
+          <h2>现有笔记区</h2>
+          <div id="note-empty" class="empty">在左边选一篇笔记</div>
+          <div id="note" class="note hidden">
+            <h3 id="note-title"></h3>
+            <div id="note-meta" class="meta"></div>
+            <div id="note-images" class="note-images"></div>
+            <textarea id="note-body" spellcheck="false"></textarea>
+            <div class="note-foot">
+              <button id="revisions">查看版本</button>
+              <button id="rollback">回滚到最新版本</button>
+            </div>
+          </div>
+        </div>
+        <div class="pane" id="pane-discuss">
+          <h2>讨论区</h2>
+          <div id="discuss" class="discuss">
+            <p class="empty">P2 接入 AI 后，这里显示与模型的往来消息。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="col col-right">
+        <div class="pane" id="pane-annotations">
+          <h2>批注区</h2>
+          <form id="annotation-form" class="annotation-form">
+            <select id="annotation-kind">
+              <option value="note">整篇</option>
+              <option value="text">选中的文字</option>
+              <option value="image">图片区域</option>
+            </select>
+            <select id="annotation-color">
+              <option value="yellow">黄</option>
+              <option value="green">绿</option>
+              <option value="blue">蓝</option>
+              <option value="red">红</option>
+            </select>
+            <textarea id="annotation-body" rows="3" placeholder="写一条批注……"></textarea>
+            <button type="submit">添加批注</button>
+          </form>
+          <div id="annotations" class="annotations"></div>
+        </div>
       </section>
     </main>
 
-    <footer id="status" class="status">正在连接平台……</footer>
+    <dialog id="settings-dialog">
+      <form id="settings-form" method="dialog">
+        <h2>设置</h2>
+        <label>
+          平台地址
+          <input id="cfg-base" type="text" placeholder="http://127.0.0.1:8000" />
+        </label>
+        <label>
+          API Key（需要 notes_read / notes_write 作用域）
+          <input id="cfg-key" type="password" autocomplete="off" />
+        </label>
+        <label>
+          笔记目录（与平台的 DRIVER_NOTES_DIR 一致）
+          <input id="cfg-dir" type="text" />
+        </label>
+        <label class="row">
+          <input id="cfg-readonly" type="checkbox" />
+          只读模式（隐藏写入口、禁用截图热键）
+        </label>
+        <div class="dialog-actions">
+          <button id="cfg-cancel" type="button">取消</button>
+          <button id="cfg-save" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="app.js"></script>
   </body>
 </html>
