@@ -1,0 +1,13 @@
+{
+  "name": "phonote",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PhoNote 桌面壳：网课截图 → AI 笔记（P0：截图入缓冲区 → 组成笔记 → 读回）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

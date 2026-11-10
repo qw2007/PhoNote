@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; style-src 'self'" />
+    <title>PhoNote</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <strong class="brand">PhoNote</strong>
+      <span id="hint" class="hint">Ctrl+Shift+S 截图 · 选图 · 组笔记</span>
+      <span class="spacer"></span>
+      <button id="capture" class="primary">截图</button>
+      <button id="open-folder">打开目录</button>
+    </header>
+
+    <main class="layout">
+      <aside class="pane tree-pane">
+        <h2>笔记树</h2>
+        <div id="tree" class="tree"></div>
+      </aside>
+
+      <section class="pane buffer-pane">
+        <h2>图片区 <small id="buffer-count"></small></h2>
+        <div id="buffer" class="buffer"></div>
+        <div class="compose">
+          <input id="title" type="text" placeholder="笔记标题" autocomplete="off" />
+          <button id="compose" class="primary">组成笔记</button>
+        </div>
+      </section>
+
+      <section class="pane note-pane">
+        <h2>现有笔记</h2>
+        <div id="note" class="note"><p class="muted">从左侧树里选一篇笔记。</p></div>
+      </section>
+    </main>
+
+    <footer id="status" class="status">正在连接平台……</footer>
+    <script src="app.js"></script>
+  </body>
+</html>
