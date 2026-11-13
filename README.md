@@ -50,7 +50,14 @@ curl.exe -s http://127.0.0.1:8000/notes/api/tree
 ### 2. 桌面壳
 
 ```powershell
-npm install
+# 1) 装依赖。Electron 的二进制从 GitHub Releases 拉，直连不通时用镜像：
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+npm install --no-audit --no-fund
+
+# 2) npm 11 默认拦住依赖的 postinstall 脚本，Electron 二进制不会自己下载，补一步：
+node node_modules/electron/install.js      # 生成 node_modules/electron/dist/electron.exe
+
+# 3) 启动
 npm start
 ```
 
@@ -124,5 +131,7 @@ curl.exe -s -X POST http://127.0.0.1:8000/notes/api/sync/pull -H "X-API-Key: $KE
 - 真实的坚果云 / Nextcloud **没有连过**：只用本机写的 WebDAV 假服务（真实 HTTP）验过
   push → 换目录 pull。
 - `openai` / `anthropic` 两种模式**只用 `httpx.MockTransport` 测过**，没有对真实模型服务跑过。
-- **`npm install` 未在本机实际跑过**（本机网络对 npm registry 不稳），Electron
-  版本与依赖树未经验证；三个 JS 文件只做过 `node --check` 语法检查。
+- **热键未实际按键验证**：本机已真启过壳（窗口与四分区渲染正常、`/notes/api/tree` 通、无控制台报错），
+  但 `Ctrl+Shift+S` 的取帧路径没有手动按过；多屏、缩放、DPI 差异也未验证。
+- 依赖安装依赖外网：Electron 二进制走 `ELECTRON_MIRROR` 镜像，且 npm 11 的 allow-scripts
+  会拦住 postinstall，需要手动 `node node_modules/electron/install.js`（见第 2 节）。
