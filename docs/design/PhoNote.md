@@ -608,12 +608,14 @@ P0 建议一次提交：`feat(pho-note): 截图入缓冲区到组成笔记的最
 
 ---
 
-## 14. 未决（不阻塞 P0）
+## 14. 四个问题的结论（2026-11-13 拍板）
 
-1. 图片是否对**关键节点**按次保留原图（默认全不保留，需要时 `keep_original=true`）？
-2. 树是否需要"模板"（新建笔记时自动带「定义 / 定理 / 易错点」骨架）？
-3. 远端保留几份库快照（默认 5）——按天数还是按份数清理？
-4. 是否给 Agent 单独一把更窄的钥匙（只 `note_tree|note_get`），与"只读设备钥匙"分开？
+| 问题 | 结论 | 落地位置 |
+|---|---|---|
+| 关键节点按次保留原图？ | **默认不保留**；按次开启的参数 `keep_original` **尚未实现**（当前 PNG/JPEG/WebP 一律转存，原图不另存） | 待做 |
+| 树要不要「模板」？ | **要**。内置一份 `lecture` 骨架（定义 / 定理 / 易错点 / 例题），`note_node_create` 与 `POST /nodes` 的 `template` 字段可选套用；正文非空时以正文为准 | `plugins/pho_note/store.py` 的 `TEMPLATES`、工具与 REST 的 `template` 字段、壳的设置项「新建笔记套用骨架」 |
+| 快照按天数还是按份数清理？ | **按份数**，默认保留 5 份（`keep` 可配，最小 1） | `plugins/pho_note/sync.py` 的 `DEFAULT_KEEP` 与截断逻辑 |
+| 给 Agent 单独一把更窄的钥匙？ | **要**。推荐 `pho-agent:note_tree\|note_get\|note_list_captures`，与 REST 的 `notes_read` 只读设备钥匙分开（工具作用域与 REST 作用域是两套） | `tests/test_pho_note_tools.py::test_agent_key_can_read_but_not_write` |
 
 ---
 

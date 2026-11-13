@@ -319,6 +319,7 @@ async function newNode() {
     kind: 'note',
     name,
     body_md: '',
+    template: state.config.useTemplate === false ? null : 'lecture',
   });
   await loadTree();
   await openNote(created.id);
@@ -548,6 +549,7 @@ function openSettings() {
   el('cfg-key').value = state.config.apiKey || '';
   el('cfg-dir').value = state.config.notesDir || '';
   el('cfg-readonly').checked = Boolean(state.config.readonly);
+  el('cfg-template').checked = state.config.useTemplate !== false;
   el('settings-dialog').showModal();
 }
 
@@ -558,6 +560,7 @@ async function saveSettings(event) {
     apiKey: el('cfg-key').value.trim(),
     notesDir: el('cfg-dir').value.trim(),
     readonly: el('cfg-readonly').checked,
+    useTemplate: el('cfg-template').checked,
   };
   state.config = await window.phonote.saveConfig(patch);
   el('settings-dialog').close();

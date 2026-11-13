@@ -14,6 +14,8 @@ const DEFAULT_SETTINGS = {
   notesDir: path.join(app.getPath('home'), 'PhoNote'),
   // 第二台设备 / 投屏场景：只读钥匙只能读，壳里也要把写入口收起来。
   readonly: false,
+  // 新建笔记时套用平台内置骨架（lecture：定义 / 定理 / 易错点 / 例题）。
+  useTemplate: true,
 };
 
 let mainWindow = null;
@@ -29,6 +31,7 @@ function readSettings() {
       ...DEFAULT_SETTINGS,
       ...raw,
       readonly: raw.readonly === true,
+      useTemplate: raw.useTemplate !== false,
     };
   } catch (error) {
     return { ...DEFAULT_SETTINGS };
