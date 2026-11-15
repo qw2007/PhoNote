@@ -550,6 +550,7 @@ function openSettings() {
   el('cfg-dir').value = state.config.notesDir || '';
   el('cfg-readonly').checked = Boolean(state.config.readonly);
   el('cfg-template').checked = state.config.useTemplate !== false;
+  el('cfg-hotkey').value = state.config.hotkey || 'Control+Alt+P';
   el('cfg-bundle').checked = state.config.bundleBackend !== false;
   el('cfg-ai-mode').value = state.config.aiMode || 'off';
   el('cfg-ai-base').value = state.config.aiBaseUrl || '';
@@ -588,6 +589,7 @@ async function saveSettings(event) {
     notesDir: el('cfg-dir').value.trim(),
     readonly: el('cfg-readonly').checked,
     useTemplate: el('cfg-template').checked,
+    hotkey: el('cfg-hotkey').value.trim() || 'Control+Alt+P',
     bundleBackend: el('cfg-bundle').checked,
     aiMode: el('cfg-ai-mode').value,
     aiBaseUrl: el('cfg-ai-base').value.trim(),
@@ -597,8 +599,115 @@ async function saveSettings(event) {
   state.config = await window.phonote.saveConfig(patch);
   el('settings-dialog').close();
   applyMode();
+  state.hotkey = await window.phonote.hotkeyStatus();
+  showHotkey(state.hotkey);
   await reload();
   say('设置已保存');
+}
+
+// ---------------------------------------------------------------- 热键录制
+
+const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta']);
+
+function keyName(event) {
+  const key = event.key;
+  if (key === ' ' || key === 'Spacebar') {
+    return 'Space';
+  }
+  if (key === 'Escape' || MODIFIER_KEYS.has(key)) {
+    return null;
+  }
+  if (/^[a-zA-Z]$/.test(key)) {
+    return key.toUpperCase();
+  }
+  if (/^[0-9]$/.test(key)) {
+    return key;
+  }
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) {
+    return key;
+  }
+  const named = {
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    Enter: 'Return',
+    Tab: 'Tab',
+    Backspace: 'Backspace',
+    Delete: 'Delete',
+    Insert: 'Insert',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+  };
+  return named[key] || null;
+}
+
+function acceleratorOf(event) {
+  const name = keyName(event);
+  if (!name) {
+    return null;
+  }
+  const parts = [];
+  if (event.ctrlKey) {
+    parts.push('Control');
+  }
+  if (event.altKey) {
+    parts.push('Alt');
+  }
+  if (event.shiftKey) {
+    parts.push('Shift');
+  }
+  if (event.metaKey) {
+    parts.push('Super');
+  }
+  if (parts.length === 0) {
+    return null;
+  }
+  parts.push(name);
+  return parts.join('+');
+}
+
+function recordHotkey() {
+  const button = el('cfg-hotkey-record');
+  const input = el('cfg-hotkey');
+  button.textContent = '按下组合…';
+  const stop = () => {
+    window.removeEventListener('keydown', onKey, true);
+    button.textContent = '录制';
+  };
+  function onKey(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      stop();
+      return;
+    }
+    const accelerator = acceleratorOf(event);
+    if (!accelerator) {
+      el('hotkey-state').textContent = '需要至少一个修饰键（Ctrl / Alt / Shift）';
+      return;
+    }
+    input.value = accelerator;
+    stop();
+    el('hotkey-state').textContent = `已录制 ${accelerator}，保存后生效`;
+  }
+  window.addEventListener('keydown', onKey, true);
+}
+
+function showHotkey(status) {
+  const target = el('hotkey-state');
+  if (!target || !status) {
+    return;
+  }
+  if (status.registered) {
+    target.textContent = `生效中：${status.accelerator}`;
+  } else if (status.error) {
+    target.textContent = status.error;
+  } else {
+    target.textContent = '';
+  }
 }
 
 // ---------------------------------------------------------------- 启动
@@ -632,6 +741,9 @@ async function boot() {
   el('revisions').addEventListener('click', () => loadRevisions().catch(fail));
   el('rollback').addEventListener('click', () => rollbackLatest().catch(fail));
   el('settings').addEventListener('click', openSettings);
+  el('cfg-hotkey-record').addEventListener('click', recordHotkey);
+  state.hotkey = await window.phonote.hotkeyStatus();
+  showHotkey(state.hotkey);
   el('cfg-cancel').addEventListener('click', () => el('settings-dialog').close());
   el('open-folder').addEventListener('click', () => window.phonote.openFolder('notes'));
   el('annotation-form').addEventListener('submit', addAnnotation);
@@ -653,12 +765,17 @@ async function boot() {
   window.phonote.onError((message) => fail(message));
 
   await reload();
+  // 热键没注册上时不能装作正常：状态行直接说清楚，工具栏按钮仍可用。
+  const hotkeyText =
+    state.hotkey && state.hotkey.registered
+      ? `${state.hotkey.accelerator} 截图`
+      : `热键未生效（${(state.hotkey && state.hotkey.error) || '未知原因'}），可用「截图入缓冲区」按钮`;
   if (state.server && state.server.status === 'ready') {
-    say(`本机服务已就绪（:${state.server.port}）｜Ctrl+Shift+S 截图`);
+    say(`本机服务已就绪（:${state.server.port}）｜${hotkeyText}`);
   } else if (state.server && state.server.status === 'error') {
     say(`本机服务启动失败：${state.server.error || '未知原因'}`);
   } else {
-    say('准备就绪：Ctrl+Shift+S 截图');
+    say(`准备就绪：${hotkeyText}`);
   }
 }
 

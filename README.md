@@ -81,12 +81,20 @@ npm start
   `"ro:notes_read"` 并把壳切到只读。
 - `notesDir`：必须与平台的 `DRIVER_NOTES_DIR` 一致——图片按 sha256 从磁盘直读。
 - `readonly`：只读模式，隐藏全部写入口、禁用截图热键（配合只读钥匙使用）。
+- `hotkey`：截图热键，Electron accelerator 语法，**默认 `Control+Alt+P`**；设置里点「录制」按下新组合即可改（见下节）。注册不上（被别的程序占了）时状态行会直接说明，按钮仍可用。
 - `useTemplate`：新建笔记是否套用平台内置骨架 `lecture`（`## 定义 / ## 定理 · 结论 / ## 易错点 / ## 例题`），默认 `true`；设置里对应「新建笔记套用骨架」。
 - 给 Agent 用的话另建一把更窄的钥匙：`pho-agent:note_tree|note_get|note_list_captures`（只读工具白名单），别把 `notes_write` 给它。
 
-### 3. 用法
+### 3. 截图热键（可 DIY）
 
-1. 开着网课，按 `Ctrl+Shift+S`（或点「截图入缓冲区」）→ 图片进**图片区**；
+- 默认 `Control+Alt+P`。早期版本用的 `Control+Shift+S` 与浏览器「网页另存为」、部分截图工具撞车，已改掉；旧 `settings.json` 里没有 `hotkey` 字段时会自动落到新默认值。
+- 设置 → 「截图热键」→ 点「录制」→ 按下想要的组合（必须带至少一个修饰键，`Esc` 取消）→ 保存。加速键支持字母/数字/`F1`–`F24`/方向键/`Space`/`Tab`/`Backspace`/`Delete`/`Insert`/`Home`/`End`/`PageUp`/`PageDown`。
+- 注册失败不会静默：状态行显示 `热键未生效（hotkey_taken: … 被别的程序占用，换一个组合）` 或 `hotkey_invalid: …`，此时仍可用工具栏「截图入缓冲区」。
+- 只读模式下不注册热键（避免在共享屏幕上误触）。
+
+### 4. 用法
+
+1. 开着网课，按热键（默认 `Control+Alt+P`，或点「截图入缓冲区」）→ 图片进**图片区**；
 2. 在图片区点要用的图（可多选）→ 填标题 → 「组成笔记」→ 新笔记出现在左侧树里；工具栏「新建笔记」会按设置套上骨架（定义/定理/易错点/例题），不想要就取消勾选；
 3. 点树里的笔记 → 右侧**现有笔记区**显示图与正文，改完点「保存笔记」（存旧版本）；
 4. 右侧**讨论区**：填一句话点「让 AI 总结」，或直接「发送」追问；模型会回摘要 + 若干条
@@ -162,7 +170,7 @@ npm run package        # = powershell -File scripts/package.ps1
 
 - 打包版双击启动：自带后端在随机端口（本机实测 `:61632`）起来，界面状态行显示
   `本机服务已就绪（:61632）`，文件树读到 `C:\Users\Administrator\PhoNote` 里的笔记。
-- `Ctrl+Shift+S` 在**打包版**里真实按键：出现「已截图: cap_…」，图片区计数 +1，
+- 热键（默认 `Control+Alt+P`，设置里可录制改动）在**打包版**里真实按键：出现「已截图: cap_…」，图片区计数 +1，
   `GET /notes/api/captures` 能看到 `image/webp 1600x900`。
 - 设置里的「AI 模式 / Base URL / API Key / 模型」改完会自动重启本机后端（换 key 不用重启应用）。
 
@@ -190,7 +198,10 @@ npm run package        # = powershell -File scripts/package.ps1
 - 真实的坚果云 / Nextcloud **没有连过**：只用本机写的 WebDAV 假服务（真实 HTTP）验过
   push → 换目录 pull。
 - `openai` / `anthropic` 两种模式**只用 `httpx.MockTransport` 测过**，没有对真实模型服务跑过。
-- 热键已用 `AppActivate` + `SendKeys("^+s")` 在打包版里真按过（截图进缓冲区、`image/webp 1600x900`）；
-  但多屏、缩放、DPI 差异仍未验证（现在只取 `desktopCapturer` 的第一块屏）。
+- 热键在**打包版**里真按过：旧默认 `Ctrl+Shift+S` 与 `Ctrl+Alt+P` 都能触发截图（出现「已截图: cap_…」，
+  图片区计数 +1，`GET /notes/api/captures` 能看到 `image/webp 1600x900`）；把配置改成
+  `Control+Alt+K` 重启后，`Ctrl+Alt+P` 不再触发、`Ctrl+Alt+K` 触发（干净目录实测 0→1）；
+  填一个不合法组合（`Control+Alt`）时状态行显示 `热键未生效（hotkey_invalid: …）`。
+  多屏、缩放、DPI 差异仍未验证（现在只取 `desktopCapturer` 的第一块屏）。
 - 依赖安装依赖外网：Electron 二进制走 `ELECTRON_MIRROR` 镜像，且 npm 11 的 allow-scripts
   会拦住 postinstall，需要手动 `node node_modules/electron/install.js`（见第 2 节）。

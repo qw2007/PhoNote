@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('phonote', {
   mediaUrl: (image) => ipcRenderer.invoke('phonote:media-url', image),
   openFolder: (folder) => ipcRenderer.invoke('phonote:open-folder', folder),
   serverStatus: () => ipcRenderer.invoke('phonote:server-status'),
+  hotkeyStatus: () => ipcRenderer.invoke('phonote:hotkey-status'),
   onServer: (handler) => {
     ipcRenderer.on('phonote:server', (_event, status) => handler(status));
   },

@@ -131,6 +131,14 @@
           新建笔记套用骨架（定义 / 定理 / 易错点 / 例题）
         </label>
         <hr />
+        <label>
+          截图热键（点「录制」后按下想要的组合，至少带一个修饰键）
+          <span class="hotkey-row">
+            <input id="cfg-hotkey" type="text" readonly placeholder="Control+Alt+P" />
+            <button id="cfg-hotkey-record" type="button" class="secondary">录制</button>
+          </span>
+        </label>
+        <p id="hotkey-state" class="hint"></p>
         <label class="row">
           <input id="cfg-bundle" type="checkbox" />
           使用内置后端（打包版自带，勾掉就连下面填的地址）

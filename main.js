@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 
-const HOTKEY = 'Control+Shift+S';
+const DEFAULT_HOTKEY = 'Control+Alt+P';
 const THUMBNAIL = { width: 1600, height: 1600 };
 const JPEG_QUALITY = 85;
 
@@ -20,6 +20,8 @@ const DEFAULT_SETTINGS = {
   useTemplate: true,
   // 打包版自带后端（phonote-backend.exe）：勾着就不用另外起平台。
   bundleBackend: true,
+  // 截图热键（Electron accelerator 语法）。可 DIY：设置里录制新组合。
+  hotkey: DEFAULT_HOTKEY,
   // AI 设置：直接映射到后端的 DRIVER_NOTES_LLM*，改完会自动重启本机服务。
   aiMode: 'off',
   aiBaseUrl: '',
@@ -258,23 +260,38 @@ async function captureIntoBuffer() {
   return { capture, preview: shot.dataUrl };
 }
 
+// 热键状态：注册失败（被别的程序占用）要能告诉用户，而不是静默失灵。
+let hotkeyState = { accelerator: DEFAULT_HOTKEY, registered: false, error: null };
+
 function applyHotkey(settings) {
   globalShortcut.unregisterAll();
+  const accelerator = settings.hotkey || DEFAULT_HOTKEY;
+  hotkeyState = { accelerator, registered: false, error: null };
   if (settings.readonly) {
-    return;
+    hotkeyState.error = 'readonly: 只读模式不注册热键';
+    return hotkeyState;
   }
-  globalShortcut.register(HOTKEY, async () => {
-    try {
-      const payload = await captureIntoBuffer();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('phonote:captured', payload);
+  try {
+    const ok = globalShortcut.register(accelerator, async () => {
+      try {
+        const payload = await captureIntoBuffer();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('phonote:captured', payload);
+        }
+      } catch (error) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('phonote:error', String(error.message || error));
+        }
       }
-    } catch (error) {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('phonote:error', String(error.message || error));
-      }
+    });
+    hotkeyState.registered = ok;
+    if (!ok) {
+      hotkeyState.error = `hotkey_taken: ${accelerator} 被别的程序占用，换一个组合`;
     }
-  });
+  } catch {
+    hotkeyState.error = `hotkey_invalid: ${accelerator} 不是合法组合（需要修饰键 + 一个键）`;
+  }
+  return hotkeyState;
 }
 
 function createWindow() {
@@ -337,6 +354,7 @@ ipcMain.handle('phonote:save-config', async (_event, patch) => {
   return next;
 });
 ipcMain.handle('phonote:server-status', () => serverStatus());
+ipcMain.handle('phonote:hotkey-status', () => hotkeyState);
 ipcMain.handle('phonote:rest', (_event, request) =>
   rest(request.method || 'GET', request.path, request.body),
 );

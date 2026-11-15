@@ -1,6 +1,6 @@
 {
   "name": "phonote",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "PhoNote：网课截图 → AI 笔记（自带本机后端的桌面版）",
   "main": "main.js",
