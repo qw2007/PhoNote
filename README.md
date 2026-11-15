@@ -158,12 +158,16 @@ npm run package        # = powershell -File scripts/package.ps1
 ```
 
 产物：`dist\PhoNote-win32-x64\PhoNote.exe`（整个目录 307 MB）和
-`dist\PhoNote-0.2.0-win32-x64.zip`（148 MB，可直接发给别人解压运行）。
+`dist\PhoNote-0.2.1-win32-x64.zip`（148 MB，可直接发给别人解压运行）。
 
 ### 分发件
 
-打包好的 zip 挂在 GitHub Release 上：[v0.2.0 · 独立桌面版](https://github.com/qw2007/PhoNote/releases/tag/v0.2.0)，
-文件 `PhoNote-0.2.0-win32-x64.zip`（155,514,701 字节，sha256 `786867ec9eb72e42840b1d48ec94db452a564f11cf68b6b264df219c1fd83066`）。
+最新：[v0.2.1 · 截图热键可 DIY](https://github.com/qw2007/PhoNote/releases/tag/v0.2.1)，
+文件 `PhoNote-0.2.1-win32-x64.zip`（155,516,136 字节，sha256 `5153d78162a0ccfa8437b77392462bb8782fc98df2bf23a7ccf75078c8f8acb2`）。
+
+上一个版本：[v0.2.0 · 独立桌面版](https://github.com/qw2007/PhoNote/releases/tag/v0.2.0)，
+`PhoNote-0.2.0-win32-x64.zip`（155,514,701 字节，sha256 `786867ec9eb72e42840b1d48ec94db452a564f11cf68b6b264df219c1fd83066`）。
+
 仓库是私有的，所以下载需要登录有权限的账号；要公开发给外人得先把仓库（或至少这个 Release）放开。
 
 ### 已经实测过什么
