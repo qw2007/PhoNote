@@ -1,5 +1,8 @@
 # PhoNote
 
+网课截图 → AI 笔记的桌面应用。**打包版自带本机后端**（`phonote-backend.exe`），
+装完不需要 Python、也不需要另外起驱动平台；开发模式下才连你手动起的平台。
+
 网课截图 -> 图片缓冲区 -> 任意多图组成笔记 -> AI 总结与讨论修订 -> 批注 -> 备份与多设备同步。
 
 - 形态：桌面应用（Electron 壳）+ 平台侧领域插件（Python，驱动平台插件契约）
@@ -114,6 +117,56 @@ curl.exe -s -X POST http://127.0.0.1:8000/notes/api/sync/pull -H "X-API-Key: $KE
 （`VACUUM INTO` 快照，按 `DRIVER_NOTES_WEBDAV_KEEP` 轮换）、`phonote/media/ab/cd/<sha256>.<ext>`
 （内容寻址，只传远端缺的）。pull 会先把本地库备份到 `backups/pre-pull-<时间戳>.db` 再原子替换。
 
+## 打包成独立应用（自带后端）
+
+打包产物的结构就是 Electron 的「`resources/app`」约定：壳启动时挑一个空闲端口，
+把 `resources/app/backend/bin/phonote-backend.exe` 拉起来（里面是 PyInstaller 打进去的
+`driver_platform` + `pho_note` 插件），等 `/health` 通过再开窗；退出时杀掉它。
+所以最终用户双击 `PhoNote.exe` 就能用，`%USERPROFILE%\PhoNote` 是默认笔记目录。
+
+### 构建
+
+后端（在驱动平台仓库里跑 PyInstaller，因为要用它的虚拟环境）：
+
+```powershell
+cd D:\DSh\driver-platform-v2
+.\venv\Scripts\python.exe -m pip install pyinstaller
+.\venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --name phonote-backend `
+  --distpath .tmp\pyi-dist --workpath .tmp\pyi-work --specpath .tmp\pyi-spec `
+  --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.loops.asyncio `
+  --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.http.h11_impl `
+  --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on `
+  --hidden-import uvicorn.lifespan.off --hidden-import PIL --hidden-import PIL.Image `
+  --hidden-import prometheus_client --collect-submodules driver_platform `
+  D:\DSh\PhoNote\backend\sidecar.py
+copy .tmp\pyi-dist\phonote-backend.exe D:\DSh\PhoNote\backend\bin\
+```
+
+壳（复制 electron 发行版 + 把 JS 与后端放进 `resources/app`，最后打 zip）：
+
+```powershell
+cd D:\DSh\PhoNote
+npm run package        # = powershell -File scripts/package.ps1
+```
+
+产物：`dist\PhoNote-win32-x64\PhoNote.exe`（整个目录 307 MB）和
+`dist\PhoNote-0.2.0-win32-x64.zip`（148 MB，可直接发给别人解压运行）。
+
+### 已经实测过什么
+
+- 打包版双击启动：自带后端在随机端口（本机实测 `:61632`）起来，界面状态行显示
+  `本机服务已就绪（:61632）`，文件树读到 `C:\Users\Administrator\PhoNote` 里的笔记。
+- `Ctrl+Shift+S` 在**打包版**里真实按键：出现「已截图: cap_…」，图片区计数 +1，
+  `GET /notes/api/captures` 能看到 `image/webp 1600x900`。
+- 设置里的「AI 模式 / Base URL / API Key / 模型」改完会自动重启本机后端（换 key 不用重启应用）。
+
+### 没有做的事（别当它能做）
+
+- **没有代码签名**：首次运行会被 SmartScreen 拦一下（「更多信息 → 仍要运行」）。
+- **没有自动更新**：换版本要重新打包分发。
+- 只出了 **Windows x64** 便携版；没有安装器、没有开始菜单项、没有 macOS/Linux 包。
+- GitHub Actions 不构建这个包（PyInstaller + Electron 二进制都不在 CI 里下）。
+
 ## 已知限制（P3 范围内，不是 bug）
 
 - 多屏时只截**第一个屏幕**（取 `desktopCapturer` 的第一个 source）。
@@ -131,7 +184,7 @@ curl.exe -s -X POST http://127.0.0.1:8000/notes/api/sync/pull -H "X-API-Key: $KE
 - 真实的坚果云 / Nextcloud **没有连过**：只用本机写的 WebDAV 假服务（真实 HTTP）验过
   push → 换目录 pull。
 - `openai` / `anthropic` 两种模式**只用 `httpx.MockTransport` 测过**，没有对真实模型服务跑过。
-- **热键未实际按键验证**：本机已真启过壳（窗口与四分区渲染正常、`/notes/api/tree` 通、无控制台报错），
-  但 `Ctrl+Shift+S` 的取帧路径没有手动按过；多屏、缩放、DPI 差异也未验证。
+- 热键已用 `AppActivate` + `SendKeys("^+s")` 在打包版里真按过（截图进缓冲区、`image/webp 1600x900`）；
+  但多屏、缩放、DPI 差异仍未验证（现在只取 `desktopCapturer` 的第一块屏）。
 - 依赖安装依赖外网：Electron 二进制走 `ELECTRON_MIRROR` 镜像，且 npm 11 的 allow-scripts
   会拦住 postinstall，需要手动 `node node_modules/electron/install.js`（见第 2 节）。

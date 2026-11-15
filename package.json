@@ -1,11 +1,12 @@
 {
   "name": "phonote",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "PhoNote 桌面壳：网课截图 → AI 笔记（P0：截图入缓冲区 → 组成笔记 → 读回）",
+  "description": "PhoNote：网课截图 → AI 笔记（自带本机后端的桌面版）",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1"
   },
   "devDependencies": {
     "electron": "^33.0.0"

@@ -11,3 +11,7 @@ exports/
 .env
 .DS_Store
 Thumbs.db
+# 打包产物与内置后端的二进制（构建步骤见 README「打包成独立应用」）
+backend/bin/
+.tmp/
+*.zip

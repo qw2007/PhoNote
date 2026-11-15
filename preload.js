@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('phonote', {
   pickFolder: () => ipcRenderer.invoke('phonote:pick-folder'),
   mediaUrl: (image) => ipcRenderer.invoke('phonote:media-url', image),
   openFolder: (folder) => ipcRenderer.invoke('phonote:open-folder', folder),
+  serverStatus: () => ipcRenderer.invoke('phonote:server-status'),
+  onServer: (handler) => {
+    ipcRenderer.on('phonote:server', (_event, status) => handler(status));
+  },
   onCaptured: (handler) => {
     ipcRenderer.on('phonote:captured', (_event, payload) => handler(payload));
   },

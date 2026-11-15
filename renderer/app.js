@@ -550,7 +550,34 @@ function openSettings() {
   el('cfg-dir').value = state.config.notesDir || '';
   el('cfg-readonly').checked = Boolean(state.config.readonly);
   el('cfg-template').checked = state.config.useTemplate !== false;
+  el('cfg-bundle').checked = state.config.bundleBackend !== false;
+  el('cfg-ai-mode').value = state.config.aiMode || 'off';
+  el('cfg-ai-base').value = state.config.aiBaseUrl || '';
+  el('cfg-ai-key').value = state.config.aiApiKey || '';
+  el('cfg-ai-model').value = state.config.aiModel || '';
   el('settings-dialog').showModal();
+}
+
+function showServer(status) {
+  const target = el('server-state');
+  if (!target) {
+    return;
+  }
+  if (!status) {
+    target.textContent = '本机服务：未知';
+    return;
+  }
+  if (status.status === 'ready') {
+    target.textContent = `本机服务：已就绪（127.0.0.1:${status.port}）`;
+  } else if (status.status === 'external') {
+    target.textContent = '本机服务：使用外部地址（内置后端已关闭）';
+  } else if (status.status === 'error') {
+    target.textContent = `本机服务：启动失败（${status.error || '未知原因'}）`;
+  } else if (status.status === 'starting') {
+    target.textContent = '本机服务：启动中…';
+  } else {
+    target.textContent = '本机服务：未启动';
+  }
 }
 
 async function saveSettings(event) {
@@ -561,6 +588,11 @@ async function saveSettings(event) {
     notesDir: el('cfg-dir').value.trim(),
     readonly: el('cfg-readonly').checked,
     useTemplate: el('cfg-template').checked,
+    bundleBackend: el('cfg-bundle').checked,
+    aiMode: el('cfg-ai-mode').value,
+    aiBaseUrl: el('cfg-ai-base').value.trim(),
+    aiApiKey: el('cfg-ai-key').value.trim(),
+    aiModel: el('cfg-ai-model').value.trim(),
   };
   state.config = await window.phonote.saveConfig(patch);
   el('settings-dialog').close();
@@ -582,6 +614,12 @@ async function reload() {
 async function boot() {
   state.config = await window.phonote.config();
   applyMode();
+  state.server = await window.phonote.serverStatus();
+  showServer(state.server);
+  window.phonote.onServer((status) => {
+    state.server = status;
+    showServer(status);
+  });
 
   el('capture').addEventListener('click', () => captureNow().catch(fail));
   el('compose').addEventListener('click', () => composeNote().catch(fail));
@@ -606,7 +644,7 @@ async function boot() {
   window.phonote.onCaptured(async (payload) => {
     try {
       state.previews.set(payload.capture.capture_id, payload.preview);
-      await loadBuffer();
+      await Promise.all([loadTree(), loadBuffer()]);
       say(`已截图：${payload.capture.capture_id}`);
     } catch (error) {
       fail(error);
@@ -615,7 +653,13 @@ async function boot() {
   window.phonote.onError((message) => fail(message));
 
   await reload();
-  say('准备就绪：Ctrl+Shift+S 截图');
+  if (state.server && state.server.status === 'ready') {
+    say(`本机服务已就绪（:${state.server.port}）｜Ctrl+Shift+S 截图`);
+  } else if (state.server && state.server.status === 'error') {
+    say(`本机服务启动失败：${state.server.error || '未知原因'}`);
+  } else {
+    say('准备就绪：Ctrl+Shift+S 截图');
+  }
 }
 
 boot().catch(fail);

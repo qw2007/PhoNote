@@ -1,7 +1,9 @@
 'use strict';
 
 const { app, BrowserWindow, dialog, desktopCapturer, globalShortcut, ipcMain, shell } = require('electron');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 
 const HOTKEY = 'Control+Shift+S';
@@ -16,6 +18,13 @@ const DEFAULT_SETTINGS = {
   readonly: false,
   // 新建笔记时套用平台内置骨架（lecture：定义 / 定理 / 易错点 / 例题）。
   useTemplate: true,
+  // 打包版自带后端（phonote-backend.exe）：勾着就不用另外起平台。
+  bundleBackend: true,
+  // AI 设置：直接映射到后端的 DRIVER_NOTES_LLM*，改完会自动重启本机服务。
+  aiMode: 'off',
+  aiBaseUrl: '',
+  aiApiKey: '',
+  aiModel: '',
 };
 
 let mainWindow = null;
@@ -47,6 +56,135 @@ function writeSettings(patch) {
   return next;
 }
 
+// ---------------------------------------------------------------- 内置后端
+
+const backend = { child: null, port: null, base: null, status: 'stopped', error: null };
+
+function backendExe() {
+  if (!app.isPackaged) {
+    return null;
+  }
+  return path.join(process.resourcesPath, 'app', 'backend', 'bin', 'phonote-backend.exe');
+}
+
+function pickPort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForHealth(base, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${base}/health`);
+      if (response.ok) {
+        return true;
+      }
+    } catch (error) {
+      last = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw last || new Error('backend_timeout: 本地服务启动超时');
+}
+
+function backendArgs(settings, port) {
+  const args = ['--port', String(port), '--data-dir', settings.notesDir];
+  if (settings.aiMode && settings.aiMode !== 'off') {
+    args.push('--ai-mode', settings.aiMode);
+    if (settings.aiBaseUrl) {
+      args.push('--ai-base-url', settings.aiBaseUrl);
+    }
+    if (settings.aiApiKey) {
+      args.push('--ai-api-key', settings.aiApiKey);
+    }
+    if (settings.aiModel) {
+      args.push('--ai-model', settings.aiModel);
+    }
+  }
+  return args;
+}
+
+function serverStatus() {
+  return { status: backend.status, port: backend.port, base: backend.base, error: backend.error };
+}
+
+function sendServer() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('phonote:server', serverStatus());
+  }
+}
+
+async function startBackend(settings) {
+  const exe = backendExe();
+  if (!exe || settings.bundleBackend === false) {
+    backend.status = 'external';
+    return backend;
+  }
+  if (!fs.existsSync(exe)) {
+    backend.status = 'error';
+    backend.error = `backend_missing: ${exe}`;
+    return backend;
+  }
+  const port = await pickPort();
+  const child = spawn(exe, backendArgs(settings, port), { windowsHide: true });
+  child.stdout.on('data', (chunk) => console.log('[backend]', String(chunk).trim()));
+  child.stderr.on('data', (chunk) => console.error('[backend]', String(chunk).trim()));
+  child.on('exit', (code) => {
+    if (backend.child === child) {
+      backend.child = null;
+      backend.base = null;
+      backend.status = code === 0 ? 'stopped' : 'error';
+      if (code !== 0) {
+        backend.error = `backend_exit: ${code}`;
+      }
+      sendServer();
+    }
+  });
+  backend.child = child;
+  backend.port = port;
+  backend.base = `http://127.0.0.1:${port}`;
+  backend.status = 'starting';
+  backend.error = null;
+  await waitForHealth(backend.base);
+  backend.status = 'ready';
+  return backend;
+}
+
+async function stopBackend() {
+  const child = backend.child;
+  backend.child = null;
+  backend.base = null;
+  backend.port = null;
+  backend.status = 'stopped';
+  if (child && child.exitCode === null) {
+    child.kill();
+  }
+}
+
+async function restartBackend(settings) {
+  await stopBackend();
+  try {
+    await startBackend(settings);
+  } catch (error) {
+    backend.status = 'error';
+    backend.error = String(error.message || error);
+  }
+  sendServer();
+}
+
+function baseUrl() {
+  const fallback = readSettings().apiBase;
+  return (backend.base || fallback).replace(/\/+$/, '');
+}
+
 async function rest(method, pathname, payload) {
   const settings = readSettings();
   const headers = {};
@@ -56,7 +194,7 @@ async function rest(method, pathname, payload) {
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
-  const base = settings.apiBase.replace(/\/+$/, '');
+  const base = baseUrl();
   const response = await fetch(`${base}/notes/api${pathname}`, {
     method,
     headers,
@@ -157,9 +295,17 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const settings = readSettings();
+  try {
+    await startBackend(settings);
+  } catch (error) {
+    backend.status = 'error';
+    backend.error = String(error.message || error);
+  }
   createWindow();
-  applyHotkey(readSettings());
+  applyHotkey(settings);
+  sendServer();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -169,6 +315,8 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  stopBackend();
+  backend.child = null;
 });
 
 app.on('window-all-closed', () => {
@@ -178,7 +326,17 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.handle('phonote:config', () => readSettings());
-ipcMain.handle('phonote:save-config', (_event, patch) => writeSettings(patch));
+ipcMain.handle('phonote:save-config', async (_event, patch) => {
+  const before = readSettings();
+  const next = writeSettings(patch);
+  const keys = ['bundleBackend', 'aiMode', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'notesDir'];
+  const changed = keys.some((key) => before[key] !== next[key]);
+  if (changed) {
+    await restartBackend(next);
+  }
+  return next;
+});
+ipcMain.handle('phonote:server-status', () => serverStatus());
 ipcMain.handle('phonote:rest', (_event, request) =>
   rest(request.method || 'GET', request.path, request.body),
 );

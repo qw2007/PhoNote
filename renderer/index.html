@@ -130,6 +130,33 @@
           <input id="cfg-template" type="checkbox" />
           新建笔记套用骨架（定义 / 定理 / 易错点 / 例题）
         </label>
+        <hr />
+        <label class="row">
+          <input id="cfg-bundle" type="checkbox" />
+          使用内置后端（打包版自带，勾掉就连下面填的地址）
+        </label>
+        <label>
+          AI 模式
+          <select id="cfg-ai-mode">
+            <option value="off">off（不用 AI）</option>
+            <option value="openai">openai（OpenAI 兼容接口）</option>
+            <option value="anthropic">anthropic（Claude）</option>
+            <option value="manual">manual（复制粘贴，不联网）</option>
+          </select>
+        </label>
+        <label>
+          AI Base URL（留空用官方地址）
+          <input id="cfg-ai-base" type="text" placeholder="https://api.openai.com/v1" />
+        </label>
+        <label>
+          AI API Key（存在本机设置里，重启内置后端才生效）
+          <input id="cfg-ai-key" type="password" autocomplete="off" />
+        </label>
+        <label>
+          AI 模型（留空用默认：gpt-4o-mini / claude-sonnet-4-5）
+          <input id="cfg-ai-model" type="text" />
+        </label>
+        <p id="server-state" class="hint">本机服务：未启动</p>
         <div class="dialog-actions">
           <button id="cfg-cancel" type="button">取消</button>
           <button id="cfg-save" type="submit">保存</button>
