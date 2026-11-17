@@ -1,14 +1,69 @@
 {
   "name": "phonote",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "PhoNote：网课截图 → AI 笔记（自带本机后端的桌面版）",
+  "author": "Wang Qian <Wang.qian__@outlook.com>",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1"
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1",
+    "installer": "electron-builder --win nsis --publish never"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.qw2007.phonote",
+    "productName": "PhoNote",
+    "copyright": "Copyright © 2026 Wang Qian",
+    "directories": {
+      "output": "dist-installer",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/bin",
+        "to": "app/backend/bin",
+        "filter": [
+          "phonote-backend.exe"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "PhoNote-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PhoNote",
+      "menuCategory": false,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "artifactName": "PhoNote-Setup-${version}-${arch}.${ext}"
+    }
   }
 }

@@ -552,6 +552,8 @@ function openSettings() {
   el('cfg-template').checked = state.config.useTemplate !== false;
   el('cfg-hotkey').value = state.config.hotkey || 'Control+Alt+P';
   el('cfg-bundle').checked = state.config.bundleBackend !== false;
+  el('cfg-lan').checked = state.config.lanAccess === true;
+  showMobileUrl(state.server);
   el('cfg-ai-mode').value = state.config.aiMode || 'off';
   el('cfg-ai-base').value = state.config.aiBaseUrl || '';
   el('cfg-ai-key').value = state.config.aiApiKey || '';
@@ -568,6 +570,7 @@ function showServer(status) {
     target.textContent = '本机服务：未知';
     return;
   }
+  showMobileUrl(status);
   if (status.status === 'ready') {
     target.textContent = `本机服务：已就绪（127.0.0.1:${status.port}）`;
   } else if (status.status === 'external') {
@@ -581,6 +584,17 @@ function showServer(status) {
   }
 }
 
+function showMobileUrl(status) {
+  const target = el('lan-url');
+  if (!target) {
+    return;
+  }
+  const url = status && status.mobileUrl;
+  target.textContent = url
+    ? `手机上打开：${url}（同一 Wi-Fi；首次可能要允许 Windows 防火墙放行）`
+    : '勾上「允许手机访问」后，这里会显示手机要打开的地址。';
+}
+
 async function saveSettings(event) {
   event.preventDefault();
   const patch = {
@@ -591,12 +605,15 @@ async function saveSettings(event) {
     useTemplate: el('cfg-template').checked,
     hotkey: el('cfg-hotkey').value.trim() || 'Control+Alt+P',
     bundleBackend: el('cfg-bundle').checked,
+    lanAccess: el('cfg-lan').checked,
     aiMode: el('cfg-ai-mode').value,
     aiBaseUrl: el('cfg-ai-base').value.trim(),
     aiApiKey: el('cfg-ai-key').value.trim(),
     aiModel: el('cfg-ai-model').value.trim(),
   };
   state.config = await window.phonote.saveConfig(patch);
+  state.server = await window.phonote.serverStatus();
+  showServer(state.server);
   el('settings-dialog').close();
   applyMode();
   state.hotkey = await window.phonote.hotkeyStatus();

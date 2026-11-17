@@ -182,8 +182,46 @@ npm run package        # = powershell -File scripts/package.ps1
 
 - **没有代码签名**：首次运行会被 SmartScreen 拦一下（「更多信息 → 仍要运行」）。
 - **没有自动更新**：换版本要重新打包分发。
-- 只出了 **Windows x64** 便携版；没有安装器、没有开始菜单项、没有 macOS/Linux 包。
+- macOS/Linux 包没做。
 - GitHub Actions 不构建这个包（PyInstaller + Electron 二进制都不在 CI 里下）。
+
+## Windows 安装程序（NSIS）
+
+`npm run installer`（= `electron-builder --win nsis --publish never`）产出
+`dist-installer\PhoNote-Setup-0.3.0-x64.exe`（实测 **127,727,489 字节**）。
+
+```powershell
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_CUSTOM_DIR="{{ version }}"
+$env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+npm run installer
+```
+
+- **per-user** 安装：默认 `%LOCALAPPDATA%\Programs\PhoNote`，安装向导里可以改目录；
+  建桌面与开始菜单快捷方式；控制面板「应用」里显示 `PhoNote 0.3.0`。
+- 静默安装 `PhoNote-Setup-0.3.0-x64.exe /S`（实测 exit 0）；卸载用
+  `"$env:LOCALAPPDATA\Programs\PhoNote\Uninstall PhoNote.exe"`。
+- **未签名**：没有代码签名证书，SmartScreen 会提示「未知发布者」→「更多信息」→「仍要运行」。
+- 实测过：静默安装 exit 0、注册表卸载项 `DisplayName "PhoNote 0.3.0"` / `Publisher Wang Qian`、
+  快捷方式（桌面 `D:\Desktop\PhoNote.lnk`、开始菜单）、从安装目录启动后内置后端正常、
+  `resources\app\backend\bin\phonote-backend.exe` 与仓库里那份字节数一致（41,146,020）。
+- 包体约 122 MB：Electron 运行时 + 41 MB 的 Python 后端都在里面。
+
+## 手机上用（同一 Wi-Fi，只能导入图片）
+
+安卓拿不到桌面级截屏热键和本机文件系统，所以手机侧只做「导入图片 → 组成笔记 → 读笔记」：
+内置后端直接吐一个手机版页面（PWA，可「添加到主屏幕」）。
+
+1. 桌面端 **设置** 里勾「允许手机访问」并保存 —— 后端从 `127.0.0.1` 改绑 `0.0.0.0` 并自动重启；
+2. 对话框会显示 `手机上打开：http://192.168.x.x:<端口>/notes/api/m`（优先真网卡，跳过 WSL/虚拟网卡与 `169.254.*`）；
+3. 手机与电脑同一 Wi-Fi，浏览器打开该地址 → 菜单「添加到主屏幕」；
+4. 页面里「从相册 / 相机导入」→ 点图选中 → 填标题 →「组成笔记」；桌面端文件树里立刻出现这篇笔记。
+
+实测：`GET /notes/api/m` → 200（11536 字节）；用局域网地址 `192.168.0.106` 访问 → 200；
+上传 `cap_657d863751a5480c`、`POST /notes` 建出「手机导入测试」。
+
+限制：只做导入/组笔记/读笔记，没有文件树增删改、批注、讨论区；Windows 防火墙首次要放行该端口；
+手机与电脑必须同一局域网（跨网络得靠 VPN 或内网穿透）。
 
 ## 已知限制（P3 范围内，不是 bug）
 

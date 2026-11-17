@@ -3,8 +3,9 @@
 桌面端（Electron 主进程）在启动时用随机端口拉起这个进程，退出时杀掉它；
 打出来的 exe 已经把 driver_platform 一起装进包里，所以最终用户不需要 Python。
 
-三类参数：
+参数：
   --port       监听端口（主进程挑一个空闲端口传进来）
+  --host       监听地址：默认 127.0.0.1（只有本机）；0.0.0.0 让同一 Wi-Fi 的手机也能连
   --data-dir   笔记库目录（默认 %APPDATA%\\PhoNote\\notes）
   --ai-*       模型配置，直接映射到平台的 DRIVER_NOTES_LLM* 开关
 
@@ -17,7 +18,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 from pathlib import Path
 
 
@@ -38,6 +38,7 @@ def build_settings(args: argparse.Namespace):
         notes_llm_base_url=args.ai_base_url,
         notes_llm_api_key=args.ai_api_key,
         notes_llm_model=args.ai_model,
+        # 手机版要能从同一 Wi-Fi 连进来，所以这个内部服务不用登录（只有笔记数据、只在本机/局域网）。
         auth_mode="off",
         log_level="WARNING",
     )
@@ -46,6 +47,7 @@ def build_settings(args: argparse.Namespace):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="phonote-backend", description="PhoNote 本地后端")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--data-dir", default=str(_default_data_dir()))
     parser.add_argument("--ai-mode", default="off", choices=("off", "openai", "anthropic", "manual"))
     parser.add_argument("--ai-base-url", default="")
@@ -60,10 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     application = create_app(build_settings(args))
-    print(f"phonote-backend ready on 127.0.0.1:{args.port} (data: {data_dir})", flush=True)
+    print(f"phonote-backend ready on {args.host}:{args.port} (data: {data_dir})", flush=True)
     uvicorn.run(
         application,
-        host="127.0.0.1",
+        host=args.host,
         port=args.port,
         log_level="warning",
         access_log=False,

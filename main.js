@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, dialog, desktopCapturer, globalShortcut, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
+const os = require('node:os');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
@@ -22,6 +23,8 @@ const DEFAULT_SETTINGS = {
   bundleBackend: true,
   // 截图热键（Electron accelerator 语法）。可 DIY：设置里录制新组合。
   hotkey: DEFAULT_HOTKEY,
+  // 允许同一 Wi-Fi 下的手机访问手机版页面：后端改绑 0.0.0.0（默认只绑 127.0.0.1）。
+  lanAccess: false,
   // AI 设置：直接映射到后端的 DRIVER_NOTES_LLM*，改完会自动重启本机服务。
   aiMode: 'off',
   aiBaseUrl: '',
@@ -43,6 +46,7 @@ function readSettings() {
       ...raw,
       readonly: raw.readonly === true,
       useTemplate: raw.useTemplate !== false,
+      lanAccess: raw.lanAccess === true,
     };
   } catch (error) {
     return { ...DEFAULT_SETTINGS };
@@ -99,6 +103,9 @@ async function waitForHealth(base, timeoutMs = 30000) {
 
 function backendArgs(settings, port) {
   const args = ['--port', String(port), '--data-dir', settings.notesDir];
+  if (settings.lanAccess === true) {
+    args.push('--host', '0.0.0.0');
+  }
   if (settings.aiMode && settings.aiMode !== 'off') {
     args.push('--ai-mode', settings.aiMode);
     if (settings.aiBaseUrl) {
@@ -114,8 +121,45 @@ function backendArgs(settings, port) {
   return args;
 }
 
+const VIRTUAL_ADAPTER = /vEthernet|VMware|VirtualBox|Hyper-V|WSL|Docker|Loopback|Tailscale|ZeroTier/i;
+
+function lanAddress() {
+  const interfaces = os.networkInterfaces();
+  const candidates = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const item of interfaces[name] || []) {
+      if (item.family !== 'IPv4' || item.internal) {
+        continue;
+      }
+      // 169.254.* 是「没连上」时系统自己编的地址，手机连不到它。
+      if (item.address.startsWith('169.254.')) {
+        continue;
+      }
+      candidates.push({ name, address: item.address, virtual: VIRTUAL_ADAPTER.test(name) });
+    }
+  }
+  // 优先真网卡（Wi-Fi / 以太网）：手机连的是那个，不是 WSL 或虚拟机的地址。
+  const real = candidates.find((item) => !item.virtual);
+  return (real || candidates[0] || { address: null }).address;
+}
+
+function mobileUrl() {
+  const settings = readSettings();
+  if (settings.lanAccess !== true || !backend.port) {
+    return null;
+  }
+  const host = lanAddress();
+  return host ? `http://${host}:${backend.port}/notes/api/m` : null;
+}
+
 function serverStatus() {
-  return { status: backend.status, port: backend.port, base: backend.base, error: backend.error };
+  return {
+    status: backend.status,
+    port: backend.port,
+    base: backend.base,
+    error: backend.error,
+    mobileUrl: mobileUrl(),
+  };
 }
 
 function sendServer() {
@@ -346,7 +390,7 @@ ipcMain.handle('phonote:config', () => readSettings());
 ipcMain.handle('phonote:save-config', async (_event, patch) => {
   const before = readSettings();
   const next = writeSettings(patch);
-  const keys = ['bundleBackend', 'aiMode', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'notesDir'];
+  const keys = ['bundleBackend', 'aiMode', 'aiBaseUrl', 'aiApiKey', 'aiModel', 'notesDir', 'lanAccess'];
   const changed = keys.some((key) => before[key] !== next[key]);
   if (changed) {
     await restartBackend(next);

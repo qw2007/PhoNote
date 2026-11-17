@@ -15,3 +15,5 @@ Thumbs.db
 backend/bin/
 .tmp/
 *.zip
+dist-installer/
+dist-installer/**
