@@ -1,249 +1,166 @@
 # PhoNote
 
-网课截图 → AI 笔记的桌面应用。**打包版自带本机后端**（`phonote-backend.exe`），
-装完不需要 Python、也不需要另外起驱动平台；开发模式下才连你手动起的平台。
+> 边听网课边截图，顺手把截图变成可编辑、可批注、可让 AI 改的笔记。
 
-网课截图 -> 图片缓冲区 -> 任意多图组成笔记 -> AI 总结与讨论修订 -> 批注 -> 备份与多设备同步。
+PhoNote 是一个 Windows 桌面应用：按一个全局热键把当前屏幕**静默截图**进图片缓冲区，
+从中挑任意多张**组成一篇笔记**，然后在同一个窗口里读、改、批注、导出，
+并可以让 AI 总结要点或直接给「把这段换成那段」的补丁——**补丁逐条确认后才落盘**。
 
-- 形态：桌面应用（Electron 壳）+ 平台侧领域插件（Python，驱动平台插件契约）
-- 设计说明：[docs/design/PhoNote.md](docs/design/PhoNote.md)
-- 状态：**P0 / P1 / P2 / P3 已实现**（P3 = 备份 zip + WebDAV 同步，见设计文档第 7、12 节）
+它**自带后端**：安装包里已经打进了 Python 运行时与业务代码（`phonote-backend.exe`），
+装完就能用，不需要装 Python，也不需要另外起服务。
 
-## P3 包含什么
+![主界面](docs/images/app.png)
 
-| 部分 | 位置 | 内容 |
-|---|---|---|
-| 平台插件 | 驱动平台仓库 `src/driver_platform/plugins/pho_note/` | 存储层（SQLite 树 + 内容寻址图片 + 批注 + 版本 + 消息）+ 26 个工具 |
-| AI 层 | 同上 `ai.py` | OpenAI 兼容 / Anthropic / manual 三种模式；模型只回 `summary + edits` |
-| 同步层 | 同上 `sync.py` | 备份 zip + WebDAV push/pull（manifest 最后写、只传远端缺的媒体、单主设备） |
-| REST 层 | 同上 `api.py` | `/notes/api/*` 二十四条端点（含 AI 与同步），`DRIVER_NOTES_UI=1` 才挂载 |
-| 桌面壳 | 本仓库 `main.js` / `preload.js` / `renderer/` | 四分区界面、全局热键截图、树增删改移、批注、版本回滚、AI 讨论与补丁确认、只读模式 |
+三个分区一目了然：左边文件树 + 图片缓冲区，中间现有笔记区 + 讨论区，右边批注区。
 
-查看界面的四个分区：**图片区**（缓冲区）、**讨论区**（与 AI 的往来消息 + 补丁预览）、
-**现有笔记区**（正文编辑）、**批注区**（整篇 / 选中文字 / 图片区域三种锚点）。
-左侧另有一列文件树用于导航。
+## 它解决什么问题
 
-二十六个工具：树 `note_tree`、`note_node_create`、`note_node_rename`、`note_node_move`、
-`note_node_delete`；截图 `note_add_capture`、`note_list_captures`；笔记 `note_compose`、
-`note_get`、`note_list`、`note_update`、`note_set_images`；批注 `note_annotate`、
-`note_annotate_delete`；版本 `note_revisions`、`note_rollback`；导出 `note_export`；
-AI `note_summarize`、`note_chat`、`note_messages`、`note_apply_patch`、`note_ingest_ai_reply`；
-备份与同步 `note_backup`、`note_sync_push`、`note_sync_pull`、`note_sync_status`。
+听课时真正费时的不是记，而是三件事：截图散落在相册里、笔记和截图对不上号、
+AI 生成的"总结"把你原来的结构冲掉。PhoNote 的做法是：
 
-## 跑起来
+- **截图即入缓冲区**：全局热键（默认 `Control+Alt+P`，可自己录制）截当前屏幕，
+  不弹窗、不打断播放，图片直接进图片区。
+- **笔记 = 缓冲区里任意多张图的组合**：一套课可以攒一堆图，最后挑相关的几张组成一篇笔记；
+  用过即从缓冲区消失，不重复、不歧义。
+- **Markdown 是唯一真话**：笔记正文就是 Markdown，图按 sha256 内容寻址落盘；
+  导出 Markdown 时图片是绝对路径，粘到哪儿都能看。
+- **AI 只提补丁，不直接改**：模型返回「摘要 + 若干条 `find → replace`」，
+  界面先列出来给你看，点「套用补丁」才写回正文，并且**旧版本自动进历史**，可回滚。
+- **批注分三种锚点**：整篇、选中文字、图片区域（后两者目前是占位锚点，见"已知限制"）。
 
-### 1. 平台侧
+## 功能一览
 
-```powershell
-# 在驱动平台仓库根目录
-$env:DRIVER_PLUGINS = "pho_note"
-$env:DRIVER_NOTES_DIR = "$env:USERPROFILE\PhoNote"   # 可省略，默认就是这个
-$env:DRIVER_NOTES_UI = "1"                            # 挂载 /notes/api/*
-$env:DRIVER_NOTES_LLM = "manual"                      # off（默认）| openai | anthropic | manual
-.\.venv\Scripts\python.exe -m uvicorn driver_platform.main:app --host 127.0.0.1 --port 8000
+| 能力 | 说明 |
+|---|---|
+| 全局热键截图 | 默认 `Control+Alt+P`；设置里点「录制」可改任意组合，被别的程序占用会明确提示 |
+| 图片缓冲区 | 缩略图墙，多选后组成笔记；只显示还没被用过的图 |
+| 文件树 | 任意深度、可改名/移动/删除（目录非空要显式确认）；同级重名自动加后缀 |
+| 笔记编辑 | Markdown 正文 + 图片；保存时自动留历史版本，可回滚 |
+| 笔记本体模板 | 新建笔记可套「定义 / 定理·结论 / 易错点 / 例题」骨架 |
+| AI 讨论 | 讨论区里直接追问；`off / openai / anthropic / manual` 四种模式，manual 不需要任何 key |
+| 批注 | 整篇 / 选中文字 / 图片区域三种锚点，可指定颜色 |
+| 导出 | 一键把当前笔记的 Markdown 复制到剪贴板 |
+| 备份与同步 | 命令行触发：打自包含 zip；WebDAV push / pull（单主设备，manifest 最后写） |
+| 手机端 | 同一 Wi-Fi 下用手机浏览器打开内置的手机版页面（PWA），相册/相机导入 → 组成笔记 |
+| 只读模式 | 隐藏全部写入口并停用热键，配合只读 API key 使用 |
+
+## 安装（Windows）
+
+1. 到 [Releases](https://github.com/qw2007/PhoNote/releases) 下载最新的
+   `PhoNote-Setup-<版本>-x64.exe`；
+2. 双击安装（per-user 装到 `%LOCALAPPDATA%\Programs\PhoNote`，可改目录），
+   会建桌面与开始菜单快捷方式；
+3. 打开 PhoNote，默认笔记目录是 `%USERPROFILE%\PhoNote`，可在设置里改。
+
+安装包**没有代码签名**，首次运行 Windows SmartScreen 会提示「未知发布者」→
+「更多信息」→「仍要运行」。卸载走「应用和功能」里的 PhoNote，或
+`"%LOCALAPPDATA%\Programs\PhoNote\Uninstall PhoNote.exe"`。
+
+## 上手三步
+
+1. 开着网课，按热键（或点工具栏「截图入缓冲区」），图片区出现缩略图；
+2. 点选要用的图 → 填标题 → 「组成笔记」→ 新笔记出现在左侧树里；
+3. 点树里的笔记：中间读正文、右边写批注、下面和 AI 讨论；
+   改完「保存笔记」，「导出 Markdown」把结果复制走。
+
+设置项（`%APPDATA%\phonote\settings.json`，一般不用手改）：
+
+| 键 | 作用 |
+|---|---|
+| `notesDir` | 笔记数据目录（SQLite 库 + 内容寻址的图片） |
+| `hotkey` | 截图热键，默认 `Control+Alt+P` |
+| `useTemplate` | 新建笔记是否套用内置骨架，默认开 |
+| `readonly` | 只读模式：隐藏写入口、不注册热键 |
+| `lanAccess` | 允许同一 Wi-Fi 的手机访问手机版页面 |
+| `bundleBackend` | 用安装包自带的后端（默认开）；关掉则连 `apiBase` 指定的外部服务 |
+| `aiMode` / `aiBaseUrl` / `aiApiKey` / `aiModel` | AI 模式与凭据；改完自动重启内置后端 |
+
+## 手机端（同一 Wi-Fi）
+
+安卓拿不到桌面级热键与文件系统，所以手机侧只做「导入图片 → 组成笔记 → 读笔记」：
+
+1. 桌面端 **设置** 里勾「允许手机访问」并保存——后端从 `127.0.0.1` 改绑 `0.0.0.0` 并自动重启；
+2. 对话框会显示 `手机上打开：http://<你的局域网 IP>:<端口>/notes/api/m`；
+3. 手机与电脑连同一个 Wi-Fi，浏览器打开该地址 → 菜单里「添加到主屏幕」；
+4. 页面里「从相册 / 相机导入」→ 点图选中 → 填标题 →「组成笔记」，桌面端文件树里立刻出现。
+
+首次连不上通常是 Windows 防火墙挡住了那个端口，放行即可（这是局域网 HTTP，建议只在可信网络里开）。
+
+## 架构
+
+```
+┌──────────────────────────────┐         ┌───────────────────────────────┐
+│ Electron 壳（JS）            │  HTTP   │ 内置后端（Python）            │
+│ 热键 / 截图 / 四分区界面     │────────▶│ 驱动平台 + pho_note 插件      │
+│ IPC 转发 REST 与图片字节     │  IPC    │ SQLite + 内容寻址图片文件     │
+└──────────────────────────────┘         └───────────────────────────────┘
 ```
 
-验证：
+- 界面只做展示与交互；**所有读写都落在后端**，壳通过 IPC → REST 调用它，
+  这样同一套数据手机版页面也能用。
+- 后端就是「[驱动平台](https://github.com/qw2007/DRiver-api)」的一个插件
+  （`pho_note`）：工具契约、作用域、错误信封都复用平台的约定，因此也能被 Agent 直接调用。
+- 数据只有两种形态：SQLite 库（树 / 笔记 / 批注 / 版本 / 消息）+ 按 sha256 内容寻址的图片文件。
 
-```powershell
-curl.exe -s http://127.0.0.1:8000/v1/tools | ConvertFrom-Json | ForEach-Object { $_.name }
-curl.exe -s http://127.0.0.1:8000/notes/api/tree
+数据目录结构：
+
+```
+<notesDir>/
+  phonote.db          SQLite（WAL）
+  media/ab/cd/<sha256>.<ext>   内容寻址的图片
+  backups/            备份 zip 与 pull 前的库快照
+  exports/            导出的 Markdown
 ```
 
-### 2. 桌面壳
+## 自己构建
+
+需要 Node ≥ 20 与（仅构建后端时）Python ≥ 3.11。
 
 ```powershell
-# 1) 装依赖。Electron 的二进制从 GitHub Releases 拉，直连不通时用镜像：
+# 1) 依赖（Electron 二进制走镜像；npm 11 会拦 postinstall，补一步 install.js）
 $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 npm install --no-audit --no-fund
+node node_modules/electron/install.js
 
-# 2) npm 11 默认拦住依赖的 postinstall 脚本，Electron 二进制不会自己下载，补一步：
-node node_modules/electron/install.js      # 生成 node_modules/electron/dist/electron.exe
-
-# 3) 启动
+# 2) 开发模式启动（连你手动起的外部服务）
 npm start
-```
 
-首次启动后点「设置」填配置（落在 `%APPDATA%\PhoNote\settings.json`）：
-
-```json
-{
-  "apiBase": "http://127.0.0.1:8000",
-  "apiKey": "",
-  "notesDir": "C:\\Users\\<你>\\PhoNote",
-  "readonly": false
-}
-```
-
-- `apiKey`：平台开了 `DRIVER_AUTH_MODE=required` 时，壳走 REST，需要一把带
-  `notes_read`（读）与 `notes_write`（写）作用域的钥匙，例如
-  `DRIVER_API_KEYS="rw:notes_read|notes_write"`；需要给第二台设备/投屏时再建一把
-  `"ro:notes_read"` 并把壳切到只读。
-- `notesDir`：必须与平台的 `DRIVER_NOTES_DIR` 一致——图片按 sha256 从磁盘直读。
-- `readonly`：只读模式，隐藏全部写入口、禁用截图热键（配合只读钥匙使用）。
-- `hotkey`：截图热键，Electron accelerator 语法，**默认 `Control+Alt+P`**；设置里点「录制」按下新组合即可改（见下节）。注册不上（被别的程序占了）时状态行会直接说明，按钮仍可用。
-- `useTemplate`：新建笔记是否套用平台内置骨架 `lecture`（`## 定义 / ## 定理 · 结论 / ## 易错点 / ## 例题`），默认 `true`；设置里对应「新建笔记套用骨架」。
-- 给 Agent 用的话另建一把更窄的钥匙：`pho-agent:note_tree|note_get|note_list_captures`（只读工具白名单），别把 `notes_write` 给它。
-
-### 3. 截图热键（可 DIY）
-
-- 默认 `Control+Alt+P`。早期版本用的 `Control+Shift+S` 与浏览器「网页另存为」、部分截图工具撞车，已改掉；旧 `settings.json` 里没有 `hotkey` 字段时会自动落到新默认值。
-- 设置 → 「截图热键」→ 点「录制」→ 按下想要的组合（必须带至少一个修饰键，`Esc` 取消）→ 保存。加速键支持字母/数字/`F1`–`F24`/方向键/`Space`/`Tab`/`Backspace`/`Delete`/`Insert`/`Home`/`End`/`PageUp`/`PageDown`。
-- 注册失败不会静默：状态行显示 `热键未生效（hotkey_taken: … 被别的程序占用，换一个组合）` 或 `hotkey_invalid: …`，此时仍可用工具栏「截图入缓冲区」。
-- 只读模式下不注册热键（避免在共享屏幕上误触）。
-
-### 4. 用法
-
-1. 开着网课，按热键（默认 `Control+Alt+P`，或点「截图入缓冲区」）→ 图片进**图片区**；
-2. 在图片区点要用的图（可多选）→ 填标题 → 「组成笔记」→ 新笔记出现在左侧树里；工具栏「新建笔记」会按设置套上骨架（定义/定理/易错点/例题），不想要就取消勾选；
-3. 点树里的笔记 → 右侧**现有笔记区**显示图与正文，改完点「保存笔记」（存旧版本）；
-4. 右侧**讨论区**：填一句话点「让 AI 总结」，或直接「发送」追问；模型会回摘要 + 若干条
-   `find → replace` 补丁，逐条看过再点「套用补丁」（没匹配上的会进 `skipped`）；
-   manual 模式不联网：上下文自动进剪贴板，粘给网页版模型，回复用 `note_ingest_ai_reply` 贴回；
-5. 右侧**批注区**写批注（可选整篇/选中文字/图片区域、颜色）；
-6. 「导出 Markdown」把当前笔记的 Markdown 复制到剪贴板（图片是绝对路径）。
-
-### 4. 备份与同步（命令行）
-
-壳里暂时没有备份按钮，先用工具的 HTTP 入口（都要带含 `note_*` 作用域的钥匙）：
-
-```powershell
-# 打一个自包含的 zip 到 DRIVER_NOTES_DIR\backups\
-curl.exe -s -X POST http://127.0.0.1:8000/v1/tools/execute -H "X-API-Key: $KEY" `
-  -d '{"tool":"note_backup","arguments":{}}'
-
-# 推到 WebDAV（平台侧先设 DRIVER_NOTES_WEBDAV_URL，可选 _USER/_PASSWORD/_KEEP）
-curl.exe -s -X POST http://127.0.0.1:8000/v1/tools/execute -H "X-API-Key: $KEY" `
-  -d '{"tool":"note_sync_push","arguments":{}}'
-
-# 另一台设备：先看 status 的 dirty；本地有未推送改动时 pull 会被拒绝
-curl.exe -s http://127.0.0.1:8000/notes/api/sync/status -H "X-API-Key: $KEY"
-curl.exe -s -X POST http://127.0.0.1:8000/notes/api/sync/pull -H "X-API-Key: $KEY"
-```
-
-远端布局：`phonote/manifest.json`（提交点，最后写）、`phonote/db/<UTC 时间戳>-<sha8>.db`
-（`VACUUM INTO` 快照，按 `DRIVER_NOTES_WEBDAV_KEEP` 轮换）、`phonote/media/ab/cd/<sha256>.<ext>`
-（内容寻址，只传远端缺的）。pull 会先把本地库备份到 `backups/pre-pull-<时间戳>.db` 再原子替换。
-
-## 打包成独立应用（自带后端）
-
-打包产物的结构就是 Electron 的「`resources/app`」约定：壳启动时挑一个空闲端口，
-把 `resources/app/backend/bin/phonote-backend.exe` 拉起来（里面是 PyInstaller 打进去的
-`driver_platform` + `pho_note` 插件），等 `/health` 通过再开窗；退出时杀掉它。
-所以最终用户双击 `PhoNote.exe` 就能用，`%USERPROFILE%\PhoNote` 是默认笔记目录。
-
-### 构建
-
-后端（在驱动平台仓库里跑 PyInstaller，因为要用它的虚拟环境）：
-
-```powershell
-cd D:\DSh\driver-platform-v2
-.\venv\Scripts\python.exe -m pip install pyinstaller
-.\venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --name phonote-backend `
-  --distpath .tmp\pyi-dist --workpath .tmp\pyi-work --specpath .tmp\pyi-spec `
-  --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.loops.asyncio `
-  --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.http.h11_impl `
-  --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on `
-  --hidden-import uvicorn.lifespan.off --hidden-import PIL --hidden-import PIL.Image `
-  --hidden-import prometheus_client --collect-submodules driver_platform `
-  D:\DSh\PhoNote\backend\sidecar.py
-copy .tmp\pyi-dist\phonote-backend.exe D:\DSh\PhoNote\backend\bin\
-```
-
-壳（复制 electron 发行版 + 把 JS 与后端放进 `resources/app`，最后打 zip）：
-
-```powershell
-cd D:\DSh\PhoNote
-npm run package        # = powershell -File scripts/package.ps1
-```
-
-产物：`dist\PhoNote-win32-x64\PhoNote.exe`（整个目录 307 MB）和
-`dist\PhoNote-0.2.1-win32-x64.zip`（148 MB，可直接发给别人解压运行）。
-
-### 分发件
-
-最新：[v0.2.1 · 截图热键可 DIY](https://github.com/qw2007/PhoNote/releases/tag/v0.2.1)，
-文件 `PhoNote-0.2.1-win32-x64.zip`（155,516,136 字节，sha256 `5153d78162a0ccfa8437b77392462bb8782fc98df2bf23a7ccf75078c8f8acb2`）。
-
-上一个版本：[v0.2.0 · 独立桌面版](https://github.com/qw2007/PhoNote/releases/tag/v0.2.0)，
-`PhoNote-0.2.0-win32-x64.zip`（155,514,701 字节，sha256 `786867ec9eb72e42840b1d48ec94db452a564f11cf68b6b264df219c1fd83066`）。
-
-仓库是私有的，所以下载需要登录有权限的账号；要公开发给外人得先把仓库（或至少这个 Release）放开。
-
-### 已经实测过什么
-
-- 打包版双击启动：自带后端在随机端口（本机实测 `:61632`）起来，界面状态行显示
-  `本机服务已就绪（:61632）`，文件树读到 `C:\Users\Administrator\PhoNote` 里的笔记。
-- 热键（默认 `Control+Alt+P`，设置里可录制改动）在**打包版**里真实按键：出现「已截图: cap_…」，图片区计数 +1，
-  `GET /notes/api/captures` 能看到 `image/webp 1600x900`。
-- 设置里的「AI 模式 / Base URL / API Key / 模型」改完会自动重启本机后端（换 key 不用重启应用）。
-
-### 没有做的事（别当它能做）
-
-- **没有代码签名**：首次运行会被 SmartScreen 拦一下（「更多信息 → 仍要运行」）。
-- **没有自动更新**：换版本要重新打包分发。
-- macOS/Linux 包没做。
-- GitHub Actions 不构建这个包（PyInstaller + Electron 二进制都不在 CI 里下）。
-
-## Windows 安装程序（NSIS）
-
-`npm run installer`（= `electron-builder --win nsis --publish never`）产出
-`dist-installer\PhoNote-Setup-0.3.0-x64.exe`（实测 **127,727,489 字节**）。
-
-```powershell
-$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-$env:ELECTRON_CUSTOM_DIR="{{ version }}"
-$env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+# 3) 打包成安装程序（需先按 scripts/build-backend.ps1 生成内置后端）
+$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
 npm run installer
 ```
 
-- **per-user** 安装：默认 `%LOCALAPPDATA%\Programs\PhoNote`，安装向导里可以改目录；
-  建桌面与开始菜单快捷方式；控制面板「应用」里显示 `PhoNote 0.3.0`。
-- 静默安装 `PhoNote-Setup-0.3.0-x64.exe /S`（实测 exit 0）；卸载用
-  `"$env:LOCALAPPDATA\Programs\PhoNote\Uninstall PhoNote.exe"`。
-- **未签名**：没有代码签名证书，SmartScreen 会提示「未知发布者」→「更多信息」→「仍要运行」。
-- 实测过：静默安装 exit 0、注册表卸载项 `DisplayName "PhoNote 0.3.0"` / `Publisher Wang Qian`、
-  快捷方式（桌面 `D:\Desktop\PhoNote.lnk`、开始菜单）、从安装目录启动后内置后端正常、
-  `resources\app\backend\bin\phonote-backend.exe` 与仓库里那份字节数一致（41,146,020）。
-- 包体约 122 MB：Electron 运行时 + 41 MB 的 Python 后端都在里面。
+内置后端由 `scripts/build-backend.ps1` 用 PyInstaller 打进 `backend/bin/phonote-backend.exe`
+（需要驱动平台仓库的源码与虚拟环境，脚本参数见文件头）。
 
-## 手机上用（同一 Wi-Fi，只能导入图片）
+## CI
 
-安卓拿不到桌面级截屏热键和本机文件系统，所以手机侧只做「导入图片 → 组成笔记 → 读笔记」：
-内置后端直接吐一个手机版页面（PWA，可「添加到主屏幕」）。
+`.github/workflows/ci.yml` 只做能在干净 runner 上确定完成的事：三个 JS 文件语法检查、
+`package.json` 可解析、安装包配置（`build` 段、NSIS 选项、`extraResources`）存在且指向正确路径。
+PyInstaller 后端与 Electron 二进制体积太大，不在 CI 里下载。
 
-1. 桌面端 **设置** 里勾「允许手机访问」并保存 —— 后端从 `127.0.0.1` 改绑 `0.0.0.0` 并自动重启；
-2. 对话框会显示 `手机上打开：http://192.168.x.x:<端口>/notes/api/m`（优先真网卡，跳过 WSL/虚拟网卡与 `169.254.*`）；
-3. 手机与电脑同一 Wi-Fi，浏览器打开该地址 → 菜单「添加到主屏幕」；
-4. 页面里「从相册 / 相机导入」→ 点图选中 → 填标题 →「组成笔记」；桌面端文件树里立刻出现这篇笔记。
+## 已知限制（不是 bug）
 
-实测：`GET /notes/api/m` → 200（11536 字节）；用局域网地址 `192.168.0.106` 访问 → 200；
-上传 `cap_657d863751a5480c`、`POST /notes` 建出「手机导入测试」。
+- 多屏只截**第一个屏幕**；高 DPI/缩放的坐标换算未逐一验证。
+- 截图在主进程转 JPEG（质量 85、长边 1600）后由后端再归一化成 WebP。
+- 批注的「选中文字 / 图片区域」两种锚点目前是占位对象，等选区 UI 补真实坐标。
+- AI 一次请求一次响应，没有重试、限流、流式；每次最多带 6 张图，超长笔记可能被截断。
+- 补丁只做「唯一匹配的片段替换」：不支持移动图片顺序或改结构。
+- 图片区只显示**还没被任何笔记用过**的图；删除节点不会级联删图（图片留在缓冲区）。
+- 同步只实现 WebDAV 的 `MKCOL/PUT/GET/DELETE`，没有 `PROPFIND/MOVE`、断点续传；
+  **单主设备**约定，本地有未推送改动时 pull 直接拒绝。真实的坚果云/Nextcloud 没连过，
+  只用自写的 WebDAV 假服务（真实 HTTP）验过 push → 换目录 pull。
+- `openai` / `anthropic` 两种模式只用 `httpx.MockTransport` 测过，**没有对真实模型服务跑过**；
+  只有 `manual` 模式验证到端到端（上下文进剪贴板，回复贴回来）。
+- 安装包未签名，没有自动更新，只有 Windows 包。
+- 手机端只有导入/组笔记/读笔记，没有树增删改、批注与讨论区。
 
-限制：只做导入/组笔记/读笔记，没有文件树增删改、批注、讨论区；Windows 防火墙首次要放行该端口；
-手机与电脑必须同一局域网（跨网络得靠 VPN 或内网穿透）。
+## 文档
 
-## 已知限制（P3 范围内，不是 bug）
+- 设计与数据模型：[docs/design/PhoNote.md](docs/design/PhoNote.md)
+- 后端插件（驱动平台侧）：[DRiver-api](https://github.com/qw2007/DRiver-api) 的
+  `src/driver_platform/plugins/pho_note/`
 
-- 多屏时只截**第一个屏幕**（取 `desktopCapturer` 的第一个 source）。
-- 截图在**主进程**转 JPEG（质量 85、长边 1600），还没有 WebP 与缩略图。
-- 批注的「选中文字 / 图片区域」锚点目前是占位对象，等选区 UI 补真实坐标。
-- AI 只有一条请求一条响应，没有重试、限流和流式；每次最多带 6 张图（平台侧
-  `DRIVER_NOTES_LLM_MAX_IMAGES`），超长笔记可能被模型截断。
-- `openai`/`anthropic` 需要 API key；只有 `manual` 模式不需要任何 key（上下文包 + 手动粘回）。
-- 补丁只做「唯一匹配的片段替换」，不支持移动图片顺序或改结构（要改就改正文，或另发一条指令）。
-- 图片区只显示**还没被任何笔记用过**的图（`unused_only=true`），用完即消失。
-- 删除节点不级联删图：图片留在缓冲区，可以再用。
-- 同步只实现 `MKCOL`/`PUT`/`GET`/`DELETE`，没有 `PROPFIND`/`MOVE`，也没有断点续传与分块上传；
-  远端只增不删媒体，靠 `KEEP` 轮换快照间接收敛。
-- 同步是**单主设备**约定：不做双向合并，本地有未推送改动时 pull 直接拒绝。
-- 真实的坚果云 / Nextcloud **没有连过**：只用本机写的 WebDAV 假服务（真实 HTTP）验过
-  push → 换目录 pull。
-- `openai` / `anthropic` 两种模式**只用 `httpx.MockTransport` 测过**，没有对真实模型服务跑过。
-- 热键在**打包版**里真按过：旧默认 `Ctrl+Shift+S` 与 `Ctrl+Alt+P` 都能触发截图（出现「已截图: cap_…」，
-  图片区计数 +1，`GET /notes/api/captures` 能看到 `image/webp 1600x900`）；把配置改成
-  `Control+Alt+K` 重启后，`Ctrl+Alt+P` 不再触发、`Ctrl+Alt+K` 触发（干净目录实测 0→1）；
-  填一个不合法组合（`Control+Alt`）时状态行显示 `热键未生效（hotkey_invalid: …）`。
-  多屏、缩放、DPI 差异仍未验证（现在只取 `desktopCapturer` 的第一块屏）。
-- 依赖安装依赖外网：Electron 二进制走 `ELECTRON_MIRROR` 镜像，且 npm 11 的 allow-scripts
-  会拦住 postinstall，需要手动 `node node_modules/electron/install.js`（见第 2 节）。
+## License
+
+MIT，见 [LICENSE](LICENSE)。

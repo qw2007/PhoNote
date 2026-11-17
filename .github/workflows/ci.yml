@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 只跑不需要 Electron 二进制的东西：装依赖会触发 electron 的 postinstall（从 GitHub
+      # Releases 拉 100MB 运行时），在 CI 里既慢又容易受网络影响，所以这里不装 node_modules。
+      - name: 三个 JS 文件语法检查
+        run: |
+          node --check main.js
+          node --check preload.js
+          node --check renderer/app.js
+
+      - name: package.json 可解析且关键字段齐全
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const must = ["name", "version", "main", "scripts", "build"];
+            for (const key of must) {
+              if (!pkg[key]) throw new Error(`package.json 缺少 ${key}`);
+            }
+            if (!pkg.scripts.installer) throw new Error("缺少 npm run installer");
+            const b = pkg.build;
+            if (b.appId !== "com.qw2007.phonote") throw new Error("appId 被改了");
+            if (b.productName !== "PhoNote") throw new Error("productName 被改了");
+            if (b.win.target[0].target !== "nsis") throw new Error("产物必须是 NSIS 安装包");
+            const extra = (b.extraResources || []).find((e) => e.to === "app/backend/bin");
+            if (!extra) throw new Error("内置后端没被打进 resources/app/backend/bin");
+            if (!(extra.filter || []).includes("phonote-backend.exe")) {
+              throw new Error("extraResources 没带上 phonote-backend.exe");
+            }
+            for (const icon of ["installerIcon", "uninstallerIcon", "installerHeaderIcon"]) {
+              if (!b.nsis[icon]) throw new Error(`nsis.${icon} 没配`);
+            }
+            console.log(`package.json ok: ${pkg.name}@${pkg.version}`);
+          '
+
+      - name: 资源文件存在（图标与后端 sidecar 的构建脚本）
+        run: |
+          test -f build/icon.ico
+          test -f scripts/build-backend.ps1
+          test -f scripts/package.ps1
+          test -f backend/sidecar.py
+          test -f renderer/index.html
+          test -f renderer/styles.css
+          test -f README.md
+          test -f LICENSE
+
+      - name: 仓库里不应出现本机绝对路径或个人邮箱
+        run: |
+          if grep -rInE 'C:\\\\Users\\\\[A-Za-z0-9]+|192\\.168\\.[0-9]+\\.[0-9]+|[A-Za-z0-9._%+-]+@outlook\\.com' \
+            --include='*.js' --include='*.json' --include='*.md' --include='*.html' --include='*.css' --include='*.ps1' \
+            --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=dist-installer . ; then
+            echo "发现本机路径或个人邮箱，请改成占位符" >&2
+            exit 1
+          fi
+          echo "没有本机绝对路径与个人邮箱"

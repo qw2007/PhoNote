@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('phonote', {
   rest: (request) => ipcRenderer.invoke('phonote:rest', request),
   capture: () => ipcRenderer.invoke('phonote:capture'),
   pickFolder: () => ipcRenderer.invoke('phonote:pick-folder'),
+  image: (captureId) => ipcRenderer.invoke('phonote:image', captureId),
   mediaUrl: (image) => ipcRenderer.invoke('phonote:media-url', image),
   openFolder: (folder) => ipcRenderer.invoke('phonote:open-folder', folder),
   serverStatus: () => ipcRenderer.invoke('phonote:server-status'),

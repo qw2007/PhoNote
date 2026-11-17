@@ -6,6 +6,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const DEFAULT_HOTKEY = 'Control+Alt+P';
 const THUMBNAIL = { width: 1600, height: 1600 };
@@ -408,6 +409,22 @@ ipcMain.handle('phonote:pick-folder', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('phonote:image', async (_event, captureId) => {
+  const settings = readSettings();
+  const id = String(captureId || '');
+  if (!id) {
+    return null;
+  }
+  const headers = settings.apiKey ? { 'X-API-Key': settings.apiKey } : {};
+  const response = await fetch(`${baseUrl()}/notes/api/captures/${encodeURIComponent(id)}/image`, { headers });
+  if (!response.ok) {
+    return null;
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const type = response.headers.get('content-type') || 'image/webp';
+  return `data:${type};base64,${buffer.toString('base64')}`;
+});
+
 ipcMain.handle('phonote:media-url', (_event, image) => {
   const settings = readSettings();
   const sha = String(image.sha256 || '');
@@ -420,7 +437,8 @@ ipcMain.handle('phonote:media-url', (_event, image) => {
     return null;
   }
   const target = path.join(settings.notesDir, 'media', sha.slice(0, 2), sha.slice(2, 4), `${sha}.${ext}`);
-  return fs.existsSync(target) ? `file://${target.replace(/\\/g, '/')}` : null;
+  // Windows 路径必须走 pathToFileURL：手搓 file://D:/... 会被当成主机名 D。
+  return fs.existsSync(target) ? pathToFileURL(target).href : null;
 });
 
 ipcMain.handle('phonote:open-folder', (_event, folder) => {

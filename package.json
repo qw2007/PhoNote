@@ -1,9 +1,10 @@
 {
   "name": "phonote",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "PhoNote：网课截图 → AI 笔记（自带本机后端的桌面版）",
-  "author": "Wang Qian <Wang.qian__@outlook.com>",
+  "author": "PhoNote contributors",
+  "license": "MIT",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -17,7 +18,7 @@
   "build": {
     "appId": "com.qw2007.phonote",
     "productName": "PhoNote",
-    "copyright": "Copyright © 2026 Wang Qian",
+    "copyright": "Copyright © 2026 PhoNote contributors",
     "directories": {
       "output": "dist-installer",
       "buildResources": "build"

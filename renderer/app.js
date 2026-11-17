@@ -8,6 +8,7 @@ const state = {
   openNote: null,
   selected: new Set(),
   previews: new Map(),
+  blobs: new Map(),
   revisions: [],
 };
 
@@ -101,12 +102,17 @@ async function selectNode(node) {
 
 // ---------------------------------------------------------------- 图片区
 
-function imageUrl(image) {
-  const cached = state.previews.get(image.capture_id);
+async function imageUrl(image) {
+  const cached = state.previews.get(image.capture_id) || state.blobs.get(image.capture_id);
   if (cached) {
     return cached;
   }
-  return window.phonote.mediaUrl(image);
+  // 图片字节走主进程取：渲染进程的 fetch 会被 CSP 的 default-src 'self' 挡住（页面是 file://）。
+  const dataUrl = await window.phonote.image(image.capture_id);
+  if (dataUrl) {
+    state.blobs.set(image.capture_id, dataUrl);
+  }
+  return dataUrl;
 }
 
 async function loadBuffer() {
@@ -127,7 +133,7 @@ async function loadBuffer() {
     tile.title = `${capture.width}×${capture.height} · ${capture.bytes} 字节`;
     const image = document.createElement('img');
     image.alt = '截图';
-    image.src = imageUrl(capture) || '';
+    image.src = (await imageUrl(capture)) || '';
     const badge = document.createElement('span');
     badge.className = 'badge';
     badge.textContent = state.selected.has(capture.capture_id) ? '已选' : '选';
@@ -160,7 +166,7 @@ async function openNote(noteId) {
   const images = el('note-images');
   images.replaceChildren();
   for (const image of note.images || []) {
-    const src = imageUrl(image);
+    const src = await imageUrl(image);
     if (!src) {
       continue;
     }
