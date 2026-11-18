@@ -47,10 +47,17 @@ AI 生成的"总结"把你原来的结构冲掉。PhoNote 的做法是：
 ## 安装（Windows）
 
 1. 到 [Releases](https://github.com/qw2007/PhoNote/releases) 下载最新的
-   `PhoNote-Setup-<版本>-x64.exe`；
+   `PhoNote-Setup-<版本>-x64.exe`；当前最新是
+   [v0.3.1 · 修复图片区缩略图](https://github.com/qw2007/PhoNote/releases/tag/v0.3.1)，
+   文件 `PhoNote-Setup-0.3.1-x64.exe`（127,727,838 字节，
+   sha256 `30441931635a7461cf255f399ddc366de4b87e68ce1f04018a6135fcd699ca85`）；
 2. 双击安装（per-user 装到 `%LOCALAPPDATA%\Programs\PhoNote`，可改目录），
    会建桌面与开始菜单快捷方式；
 3. 打开 PhoNote，默认笔记目录是 `%USERPROFILE%\PhoNote`，可在设置里改。
+
+> **装过 0.3.0 的请先卸载再装 0.3.1**：0.3.0 的图片区缩略图只显示 alt 文字（图片字节被
+> `file://` 页面的 CSP 挡住了），0.3.1 改成由主进程取图再交给界面，已实测正常。
+> 另外 NSIS **装同版本不会覆盖**已安装内容——升级必须换版本号，或者先卸载。
 
 安装包**没有代码签名**，首次运行 Windows SmartScreen 会提示「未知发布者」→
 「更多信息」→「仍要运行」。卸载走「应用和功能」里的 PhoNote，或
